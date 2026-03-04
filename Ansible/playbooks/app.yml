@@ -308,6 +308,12 @@
     # ==============================================
     # Docker Compose Deployment
     # ==============================================
+    - name: Create CloudWatch log group for application logs
+      command: >
+        aws logs create-log-group --log-group-name /spendwise/app --region eu-west-1
+      ignore_errors: yes
+      tags: [deploy, logging]
+
     - name: Stop any existing containers
       command:
         cmd: docker compose down
