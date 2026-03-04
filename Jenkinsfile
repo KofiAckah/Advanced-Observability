@@ -75,9 +75,6 @@ pipeline {
 
         // ── Stage 5 ──────────────────────────────────────────────────
         stage('SAST Scan - CodeQL') {
-            when {
-                expression { return false } // TEMPORARILY SKIPPED — remove this block to re-enable
-            }
             steps {
                 sh 'bash pipeline/stages/05_sast_codeql.sh'
             }
@@ -146,7 +143,7 @@ pipeline {
                     sh 'bash pipeline/stages/10b_ecs_failure_diagnosis.sh'
                 }
                 always {
-                    archiveArtifacts artifacts: 'security-reports/task-definition-rendered.json',
+                    archiveArtifacts artifacts: 'security-reports/task-definition-rendered.json, security-reports/codedeploy_deployment_id.txt',
                                      allowEmptyArchive: true
                 }
             }
@@ -155,8 +152,10 @@ pipeline {
         // ── Stage 11 ─────────────────────────────────────────────────
         stage('Verify ECS Deployment') {
             steps {
-                // 8 minutes max — 24 × 15 s = 360 s
-                timeout(time: 8, unit: 'MINUTES') {
+                // 14 minutes max — 48 × 15 s = 720 s
+                // Accounts for: ECS task startup (~2 min) + health checks +
+                // traffic shift + 5-min blue task termination wait.
+                timeout(time: 14, unit: 'MINUTES') {
                     sh 'bash pipeline/stages/11_verify_ecs.sh'
                 }
             }

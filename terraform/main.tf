@@ -118,6 +118,8 @@ module "ecs" {
   image_tag          = var.image_tag
   db_name            = var.db_name
   jaeger_endpoint    = "http://${module.compute.monitoring_private_ip}:4318"
+  # Blue TG ARN is required by the CODE_DEPLOY deployment controller on the ECS service
+  blue_tg_arn        = module.networking.blue_tg_arn
 }
 
 # ==============================================================
@@ -136,6 +138,28 @@ module "rds" {
   db_name                = var.db_name
   db_username            = var.db_username
   db_password            = var.db_password
+
+  depends_on = [module.ecs]
+}
+
+# ==============================================================
+# CodeDeploy Module – blue/green ECS deployments via CodeDeploy
+# Must run after the ECS service exists (CODE_DEPLOY controller)
+# ==============================================================
+module "codedeploy" {
+  source = "./codedeploy"
+
+  project_name      = var.project_name
+  environment       = var.environment
+  aws_region        = var.aws_region
+
+  ecs_cluster_name  = module.ecs.cluster_name
+  ecs_service_name  = module.ecs.service_name
+
+  blue_tg_name      = module.networking.blue_tg_name
+  green_tg_name     = module.networking.green_tg_name
+  prod_listener_arn = module.networking.prod_listener_arn
+  test_listener_arn = module.networking.test_listener_arn
 
   depends_on = [module.ecs]
 }

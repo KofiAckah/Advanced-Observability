@@ -1,0 +1,26 @@
+# appspec.yml — CodeDeploy ECS blue/green deployment manifest
+#
+# This file is a TEMPLATE. Stage 10 of the Jenkins pipeline replaces
+# <<TASK_DEFINITION_ARN>> with the ARN of the newly registered task
+# definition revision, then uploads the rendered file to S3 before
+# calling `aws deploy create-deployment`.
+#
+# CodeDeploy uses this file to:
+#   1. Register the new task definition with the green target group.
+#   2. Run health checks via the test listener (port 8080).
+#   3. Shift the production listener (port 80) to the green TG.
+#   4. Terminate the old blue tasks after the termination wait period.
+
+version: 0.0
+Resources:
+  - TargetService:
+      Type: AWS::ECS::Service
+      Properties:
+        TaskDefinition: "<<TASK_DEFINITION_ARN>>"
+        LoadBalancerInfo:
+          ContainerName: "spendwise-backend"
+          ContainerPort: 5000
+        PlatformVersion: LATEST
+        NetworkConfiguration:
+          AwsvpcConfiguration:
+            AssignPublicIp: ENABLED

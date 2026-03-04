@@ -337,7 +337,7 @@ resource "aws_ecs_service" "app" {
   desired_count   = 1
   launch_type     = "FARGATE"
 
-  # Give containers 120 s to pass health checks before ECS marks the deployment failed
+  # Give containers time to pass health checks before ECS marks the deployment failed
   health_check_grace_period_seconds = 120
 
   network_configuration {
@@ -346,9 +346,24 @@ resource "aws_ecs_service" "app" {
     assign_public_ip = true
   }
 
-  deployment_circuit_breaker {
-    enable   = true
-    rollback = true
+  # Blue/green via CodeDeploy — CodeDeploy owns the task definition lifecycle.
+  # Rolling deployment_circuit_breaker is incompatible with CODE_DEPLOY controller.
+  deployment_controller {
+    type = "CODE_DEPLOY"
+  }
+
+  # Register initial tasks with the blue target group.
+  # CodeDeploy shifts the ALB listener to the green TG on each new deployment.
+  load_balancer {
+    target_group_arn = var.blue_tg_arn
+    container_name   = "spendwise-backend"
+    container_port   = 5000
+  }
+
+  # Terraform must NOT try to update task_definition or load_balancer after the first apply;
+  # subsequent task definition changes are deployed through CodeDeploy.
+  lifecycle {
+    ignore_changes = [task_definition, load_balancer]
   }
 
   # Wait for IAM role to be ready

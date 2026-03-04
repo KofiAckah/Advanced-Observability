@@ -1,76 +1,98 @@
 #!/usr/bin/env bash
-# Stage 11 — Verify ECS Deployment (polls until stable, 8 min max via Jenkins timeout)
+# Stage 11 — Verify CodeDeploy Blue/Green Deployment
+# Polls until the deployment reaches Succeeded (or fails on Failed/Stopped).
+#
+# CodeDeploy lifecycle stages for ECS blue/green:
+#   Created → Queued → InProgress → Ready (traffic shifted, 5-min wait) → Succeeded
+#   Any step can transition to: Failed | Stopped
 set -euo pipefail
 
-echo '=== Waiting for ECS service to stabilize ==='
-echo "--- Waiting for service to reach steady state ---"
+echo '=== Verifying CodeDeploy Blue/Green Deployment ==='
 
-STABLE_COUNT=0
-for i in $(seq 1 24); do
-    ROLLOUT=$(aws ecs describe-services \
+# Read deployment ID written by Stage 10
+if [ ! -f /tmp/codedeploy_deployment_id.txt ]; then
+    echo "❌ /tmp/codedeploy_deployment_id.txt not found — Stage 10 may have failed"
+    exit 1
+fi
+DEPLOYMENT_ID=$(cat /tmp/codedeploy_deployment_id.txt)
+echo "Deployment ID: ${DEPLOYMENT_ID}"
+echo "Polling every 15 s (max 48 attempts = 12 min)"
+echo ""
+
+for i in $(seq 1 48); do
+    DEPLOY_JSON=$(aws deploy get-deployment \
+        --deployment-id "${DEPLOYMENT_ID}" \
         --region "${AWS_REGION}" \
-        --cluster "${ECS_CLUSTER}" \
-        --services "${ECS_SERVICE}" \
-        --no-cli-pager \
-        --query 'services[0].deployments[?status==`PRIMARY`].rolloutState | [0]' \
-        --output text)
+        --output json)
 
-    RUNNING=$(aws ecs describe-services \
-        --region "${AWS_REGION}" \
-        --cluster "${ECS_CLUSTER}" \
-        --services "${ECS_SERVICE}" \
-        --no-cli-pager \
-        --query 'services[0].deployments[?status==`PRIMARY`].runningCount | [0]' \
-        --output text)
+    STATUS=$(echo "$DEPLOY_JSON" | python3 -c \
+        "import json,sys; print(json.load(sys.stdin)['deploymentInfo']['status'])")
 
-    DESIRED=$(aws ecs describe-services \
-        --region "${AWS_REGION}" \
-        --cluster "${ECS_CLUSTER}" \
-        --services "${ECS_SERVICE}" \
-        --no-cli-pager \
-        --query 'services[0].deployments[?status==`PRIMARY`].desiredCount | [0]' \
-        --output text)
+    # Try to extract a human-readable progress description
+    set +e
+    DESCRIPTION=$(echo "$DEPLOY_JSON" | python3 -c \
+        "import json,sys
+d=json.load(sys.stdin)['deploymentInfo']
+print(d.get('deploymentStatusMessages', [''])[0] or d.get('additionalDeploymentStatusInfo','') or '')" 2>/dev/null)
+    set -e
 
-    echo "Attempt $i/24 — running=$RUNNING desired=$DESIRED rolloutState=$ROLLOUT"
+    echo "Attempt $i/48 — status=${STATUS} ${DESCRIPTION}"
 
-    if [ "$ROLLOUT" = "COMPLETED" ] && [ "$RUNNING" = "$DESIRED" ]; then
-        echo "✅ Deployment COMPLETED — service is stable"
+    # ── Terminal: success ──────────────────────────────────────
+    if [ "$STATUS" = "Succeeded" ]; then
+        echo ""
+        echo "✅ CodeDeploy deployment SUCCEEDED"
+        echo "   Deployment ID : ${DEPLOYMENT_ID}"
+        echo "   Blue/green traffic shift complete."
+
+        # Print final deployment summary
+        echo ""
+        echo "--- Deployment summary ---"
+        aws deploy get-deployment \
+            --deployment-id "${DEPLOYMENT_ID}" \
+            --region "${AWS_REGION}" \
+            --query 'deploymentInfo.{Status:status,Creator:creator,Complated:completeTime,TaskSet:deploymentGroupName}' \
+            --output table
         break
     fi
 
-    if [ "$ROLLOUT" = "FAILED" ]; then
-        echo "❌ Deployment FAILED — circuit breaker rolled back"
-        echo "--- Last 5 ECS service events ---"
-        aws ecs describe-services \
+    # ── Terminal: failure ──────────────────────────────────────
+    if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Stopped" ]; then
+        echo ""
+        echo "❌ CodeDeploy deployment ${STATUS}"
+
+        echo "--- Error information ---"
+        aws deploy get-deployment \
+            --deployment-id "${DEPLOYMENT_ID}" \
             --region "${AWS_REGION}" \
-            --cluster "${ECS_CLUSTER}" \
-            --services "${ECS_SERVICE}" \
-            --no-cli-pager \
-            --query 'services[0].events[:5]' \
-            --output table
+            --query 'deploymentInfo.errorInformation' \
+            --output json
+
+        echo "--- Deployment events ---"
+        aws deploy list-deployment-instances \
+            --deployment-id "${DEPLOYMENT_ID}" \
+            --region "${AWS_REGION}" \
+            --output json 2>/dev/null || true
+
+        echo ""
+        echo "Check the AWS CodeDeploy console for full step-by-step logs:"
+        echo "  https://${AWS_REGION}.console.aws.amazon.com/codesuite/codedeploy/deployments/${DEPLOYMENT_ID}"
         exit 1
     fi
 
-    # Secondary: running==desired for 2 consecutive checks
-    if [ "$DESIRED" -gt "0" ] 2>/dev/null && [ "$RUNNING" = "$DESIRED" ]; then
-        STABLE_COUNT=$((STABLE_COUNT + 1))
-        echo "  ↳ Stable check $STABLE_COUNT/2 (running==desired)"
-        if [ "$STABLE_COUNT" -ge "2" ]; then
-            echo "✅ Service stable — running=$RUNNING desired=$DESIRED"
-            break
-        fi
-    else
-        STABLE_COUNT=0
+    # Reached 'Ready' state = traffic shifted, blue termination timer ticking (5 min)
+    if [ "$STATUS" = "Ready" ]; then
+        echo "  ↳ Traffic shifted to green. Waiting for blue task termination (5-min window)..."
     fi
 
     sleep 15
 done
 
-echo "--- Final ECS service state ---"
-aws ecs describe-services \
+# If we exit the loop with last status not Succeeded, the timeout fired (Jenkins wrapper)
+echo "--- Final deployment status ---"
+aws deploy get-deployment \
+    --deployment-id "${DEPLOYMENT_ID}" \
     --region "${AWS_REGION}" \
-    --cluster "${ECS_CLUSTER}" \
-    --services "${ECS_SERVICE}" \
-    --no-cli-pager \
-    --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount,TaskDef:taskDefinition}' \
+    --query 'deploymentInfo.{Status:status,StartTime:startTime,CompleteTime:completeTime}' \
     --output table
+

@@ -29,3 +29,9 @@ variable "environment" {
   description = "Deployment environment (dev, stage, prod)"
   type        = string
 }
+
+variable "public_subnet_cidr_2" {
+  description = "CIDR block for the second public subnet (required for ALB multi-AZ)"
+  type        = string
+  default     = "10.0.2.0/24"
+}

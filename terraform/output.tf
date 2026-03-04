@@ -161,3 +161,26 @@ output "rds_instance_id" {
   description = "RDS instance identifier"
   value       = module.rds.db_instance_id
 }
+
+# ==============================================================
+# ALB / CodeDeploy outputs
+# ==============================================================
+output "alb_dns_name" {
+  description = "DNS name of the Application Load Balancer (public entry point for the SpendWise backend API)"
+  value       = module.networking.alb_dns_name
+}
+
+output "codedeploy_app_name" {
+  description = "Name of the CodeDeploy ECS application"
+  value       = module.codedeploy.codedeploy_app_name
+}
+
+output "codedeploy_deployment_group" {
+  description = "Name of the CodeDeploy deployment group"
+  value       = module.codedeploy.codedeploy_deployment_group_name
+}
+
+output "appspec_s3_bucket" {
+  description = "S3 bucket where the pipeline uploads appspec.yml per build"
+  value       = module.codedeploy.appspec_s3_bucket
+}

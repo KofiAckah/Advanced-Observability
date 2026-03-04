@@ -49,3 +49,11 @@ variable "db_name" {
   description = "Database name for backend environment variable"
   type        = string
 }
+
+# ==============================================================
+# ALB / CodeDeploy variables
+# ==============================================================
+variable "blue_tg_arn" {
+  description = "ARN of the blue ALB target group (initial production TG for CODE_DEPLOY controller)"
+  type        = string
+}
