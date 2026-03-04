@@ -268,6 +268,7 @@ resource "aws_ecs_task_definition" "app" {
       name      = "spendwise-frontend"
       image     = "${var.frontend_image}:${var.image_tag}"
       essential = true
+      user      = "0"   # Run as root so nginx master can bind to privileged port 80.
 
       # Nginx is lightweight — reserve 256 MB, leave headroom for backend
       cpu               = 256
