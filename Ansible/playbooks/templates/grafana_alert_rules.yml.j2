@@ -1,0 +1,159 @@
+# ==============================================================
+# grafana_alert_rules.yml.j2  –  Grafana unified alert rules
+# Managed by Ansible – DO NOT edit manually on the server
+# ==============================================================
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: SpendWise Application Alerts
+    folder: SpendWise
+    interval: 1m
+    rules:
+      # ========================================================
+      # Rule 1: High HTTP Error Rate
+      # ========================================================
+      - uid: high-error-rate
+        title: High HTTP Error Rate
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: spendwise-prometheus
+            model:
+              expr: (sum(rate(http_requests_total{status_code=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))) * 100
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 5
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: High error rate detected on SpendWise
+          description: "SpendWise is experiencing a high error rate. Current value: {% raw %}{{ $values.A.Value }}{% endraw %}%"
+        labels:
+          severity: critical
+
+      # ========================================================
+      # Rule 2: High Request Latency
+      # ========================================================
+      - uid: high-latency
+        title: High Request Latency
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: spendwise-prometheus
+            model:
+              expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) * 1000
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 1000
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: High latency detected on SpendWise
+          description: "SpendWise P95 latency is above threshold. Current value: {% raw %}{{ $values.A.Value }}{% endraw %}ms"
+        labels:
+          severity: warning
+
+      # ========================================================
+      # Rule 3: Application Down
+      # ========================================================
+      - uid: app-down
+        title: SpendWise Application Down
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: spendwise-prometheus
+            model:
+              expr: up{job="spendwise_backend"}
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 1
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 1m
+        annotations:
+          summary: SpendWise backend is down
+          description: "Prometheus cannot reach the SpendWise backend. The application may be down or unreachable."
+        labels:
+          severity: critical

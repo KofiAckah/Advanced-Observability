@@ -1,0 +1,74 @@
+# ==============================================================
+# prometheus.yml.j2  –  Prometheus scrape configuration
+# Managed by Ansible – DO NOT edit manually on the server
+#
+# Variables:
+#   app_server_ip  – private IP of the app/node-exporter host
+#                    (set in monitoring.yml vars from inventory prometheus_target_ip)
+# ==============================================================
+
+global:
+  scrape_interval:     15s   # How often Prometheus scrapes targets
+  evaluation_interval: 15s   # How often Prometheus evaluates rules
+  scrape_timeout:      10s
+
+  # Labels added to every time-series and alert this Prometheus emits
+  external_labels:
+    environment: "{{ app_env | default('dev') }}"
+    project:     "spendwise"
+    region:      "{{ aws_region | default('eu-central-1') }}"
+
+# ----- Alert rules ----
+rule_files:
+  - "{{ prometheus_config_dir | default('/etc/prometheus') }}/rules/alert_rules.yml"
+
+# ----- Alertmanager (configure when Alertmanager is deployed) -----
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+          # Replace [] with ["localhost:9093"] once Alertmanager is running
+
+# ==============================================================
+# Scrape configurations
+# ==============================================================
+scrape_configs:
+
+  # ---- Prometheus self-monitoring -------------------------
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels:
+          service: "prometheus"
+
+  # ---- SpendWise Node.js Application (port 5000 / /metrics) ---
+  # Uses file_sd_configs so Jenkins can update the ECS task IP after each
+  # deployment without restarting Prometheus — file changes are auto-detected.
+  # Jenkins writes /etc/prometheus/ecs_targets.json post-deploy.
+  - job_name: "spendwise_backend"
+    metrics_path: /metrics
+    scrape_interval: 15s
+    file_sd_configs:
+      - files:
+          - "{{ prometheus_config_dir | default('/etc/prometheus') }}/ecs_targets.json"
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex:        "([^:]+)(?::\\d+)?"
+        replacement:  "$1"
+
+  # ---- Node Exporter  (system-level metrics, port 9100) ---
+  - job_name: "node_exporter"
+    metrics_path: /metrics
+    scrape_interval: 30s
+    static_configs:
+      - targets:
+          - "{{ app_server_ip }}:{{ node_exporter_port | default(9100) }}"
+        labels:
+          environment: "{{ app_env | default('dev') }}"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex:        "([^:]+)(?::\\d+)?"
+        replacement:  "$1"

@@ -1,0 +1,587 @@
+---
+# ==============================================================
+# SpendWise – Full Observability Stack Playbook
+# ==============================================================
+# Plays
+#   1. [monitoring_server] – Install Prometheus + Grafana (Ubuntu)
+#   2. [app_server]        – Install Node Exporter      (Amazon Linux 2023)
+#
+# Usage:
+#   ansible-playbook playbooks/monitoring.yml
+#   ansible-playbook playbooks/monitoring.yml --tags prometheus
+#   ansible-playbook playbooks/monitoring.yml --tags node_exporter
+#   ansible-playbook playbooks/monitoring.yml --tags grafana
+# ==============================================================
+
+# ==============================================================
+# PLAY 1 – Prometheus + Grafana on the dedicated monitoring node
+# ==============================================================
+- name: Deploy Prometheus and Grafana on Monitoring Server
+  hosts: monitoring_server
+  become: yes
+  gather_facts: yes
+
+  vars:
+    # ----- binary versions (override in inventory or via -e) -----
+    prometheus_version: "{{ hostvars[inventory_hostname]['prometheus_version'] | default('3.9.1') }}"
+    node_exporter_version: "{{ hostvars[inventory_hostname]['node_exporter_version'] | default('1.10.2') }}"
+
+    # ----- directories ----
+    prometheus_config_dir: /etc/prometheus
+    prometheus_data_dir: /var/lib/prometheus
+    grafana_provisioning_dir: /etc/grafana/provisioning
+    grafana_dashboards_dir: /var/lib/grafana/dashboards
+
+    # ----- scrape targets ----
+    # app_server_ip: private IP of the app/node-exporter host (intra-VPC).
+    # Pulled from inventory prometheus_target_ip (set by Terraform from compute output).
+    app_server_ip: "{{ hostvars[groups['app_server'][0]]['prometheus_target_ip'] | default(hostvars[groups['app_server'][0]]['ansible_host'] | default('')) }}"
+    app_backend_port: 5000
+    node_exporter_port: 9100
+
+  handlers:
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Restart Prometheus
+      service:
+        name: prometheus
+        state: restarted
+      listen: Restart Prometheus
+
+    - name: Restart Grafana
+      service:
+        name: grafana-server
+        state: restarted
+      listen: Restart Grafana
+
+  tasks:
+    # ----------------------------------------------------------
+    # System Prerequisites
+    # ----------------------------------------------------------
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      tags: [system, prometheus, grafana]
+
+    - name: Install prerequisite packages
+      apt:
+        name:
+          - curl
+          - wget
+          - tar
+          - unzip
+          - gnupg
+          - software-properties-common
+          - apt-transport-https
+        state: present
+      tags: [system]
+
+    # ----------------------------------------------------------
+    # Prometheus – user, directories, binaries
+    # ----------------------------------------------------------
+    - name: Create prometheus system user
+      user:
+        name: prometheus
+        system: yes
+        shell: /sbin/nologin
+        create_home: no
+        comment: "Prometheus monitoring daemon"
+      tags: [prometheus]
+
+    - name: Create Prometheus config and data directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: prometheus
+        group: prometheus
+        mode: '0755'
+      loop:
+        - "{{ prometheus_config_dir }}"
+        - "{{ prometheus_config_dir }}/rules"
+        - "{{ prometheus_data_dir }}"
+      tags: [prometheus]
+
+    - name: Download Prometheus archive
+      get_url:
+        url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+        dest: "/tmp/prometheus-{{ prometheus_version }}.tar.gz"
+        mode: '0644'
+        timeout: 120
+        # checksum can be pinned per release; left flexible here
+      register: prometheus_download
+      retries: 5
+      delay: 15
+      until: prometheus_download is succeeded
+      tags: [prometheus]
+
+    - name: Extract Prometheus archive
+      unarchive:
+        src: "/tmp/prometheus-{{ prometheus_version }}.tar.gz"
+        dest: /tmp/
+        remote_src: yes
+        creates: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/prometheus"
+      tags: [prometheus]
+
+    - name: Install Prometheus + promtool binaries to /usr/local/bin
+      copy:
+        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/{{ item }}"
+        dest: "/usr/local/bin/{{ item }}"
+        owner: prometheus
+        group: prometheus
+        mode: '0755'
+        remote_src: yes
+      loop:
+        - prometheus
+        - promtool
+      notify: Restart Prometheus
+      tags: [prometheus]
+
+    - name: Check if Prometheus console libraries exist (removed in Prometheus 3.x)
+      stat:
+        path: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/consoles"
+      register: prometheus_consoles_stat
+      tags: [prometheus]
+
+    - name: Copy Prometheus console libraries and templates
+      copy:
+        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/{{ item }}"
+        dest: "{{ prometheus_config_dir }}/{{ item }}"
+        owner: prometheus
+        group: prometheus
+        remote_src: yes
+      loop:
+        - consoles
+        - console_libraries
+      when: prometheus_consoles_stat.stat.exists
+      tags: [prometheus]
+
+    # ----------------------------------------------------------
+    # Prometheus – configuration files
+    # NOTE: alert_rules.yml must be deployed BEFORE prometheus.yml
+    # so that `promtool check config` can resolve the rule file path.
+    # ----------------------------------------------------------
+    - name: Deploy Prometheus alert rules
+      template:
+        src: alert_rules.yml.j2
+        dest: "{{ prometheus_config_dir }}/rules/alert_rules.yml"
+        owner: prometheus
+        group: prometheus
+        mode: '0644'
+        validate: "promtool check rules %s"
+      notify: Restart Prometheus
+      tags: [prometheus, alerts]
+
+    - name: Deploy prometheus.yml scrape configuration
+      template:
+        src: prometheus.yml.j2
+        dest: "{{ prometheus_config_dir }}/prometheus.yml"
+        owner: prometheus
+        group: prometheus
+        mode: '0644'
+        validate: "promtool check config %s"
+      notify: Restart Prometheus
+      tags: [prometheus, config]
+
+    - name: Create initial ECS targets file for spendwise_backend scrape job
+      # Jenkins overwrites this file after each ECS deploy with the new task IP.
+      # Prometheus file_sd auto-reloads on change (refresh_interval: 30s).
+      # Initial value uses app_server_ip as a placeholder; Jenkins updates it.
+      copy:
+        content: |
+          [
+            {
+              "targets": ["{{ app_server_ip }}:5000"],
+              "labels": {
+                "service": "spendwise-backend",
+                "environment": "{{ app_env | default('dev') }}"
+              }
+            }
+          ]
+        dest: "{{ prometheus_config_dir | default('/etc/prometheus') }}/ecs_targets.json"
+        owner: prometheus
+        group: prometheus
+        mode: '0644'
+        force: no
+      tags: [prometheus, config]
+
+    # ----------------------------------------------------------
+    # Prometheus – systemd service
+    # ----------------------------------------------------------
+    - name: Deploy Prometheus systemd unit file
+      template:
+        src: prometheus.service.j2
+        dest: /etc/systemd/system/prometheus.service
+        mode: '0644'
+      notify:
+        - Reload systemd
+        - Restart Prometheus
+      tags: [prometheus, service]
+
+    - name: Enable and start Prometheus service
+      service:
+        name: prometheus
+        state: started
+        enabled: yes
+      tags: [prometheus, service]
+
+    - name: Verify Prometheus is listening on port 9090
+      wait_for:
+        host: "127.0.0.1"
+        port: 9090
+        timeout: 30
+      tags: [prometheus, validate]
+
+    # ----------------------------------------------------------
+    # Grafana – APT repository + install
+    # ----------------------------------------------------------
+    - name: Add Grafana GPG signing key
+      apt_key:
+        url: https://apt.grafana.com/gpg.key
+        state: present
+      tags: [grafana]
+
+    - name: Add Grafana stable APT repository
+      apt_repository:
+        repo: "deb https://apt.grafana.com stable main"
+        state: present
+        filename: grafana
+      tags: [grafana]
+
+    - name: Install Grafana OSS
+      apt:
+        name: grafana
+        state: present
+        update_cache: yes
+      tags: [grafana]
+
+    # ----------------------------------------------------------
+    # Grafana – provisioning directories
+    # ----------------------------------------------------------
+    - name: Create Grafana provisioning directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: grafana
+        group: grafana
+        mode: '0755'
+      loop:
+        - "{{ grafana_provisioning_dir }}/datasources"
+        - "{{ grafana_provisioning_dir }}/dashboards"
+        - "{{ grafana_dashboards_dir }}"
+      tags: [grafana]
+
+    # ----------------------------------------------------------
+    # Grafana – Prometheus datasource provisioning
+    # ----------------------------------------------------------
+    - name: Deploy Grafana Prometheus datasource
+      template:
+        src: grafana_datasource.yml.j2
+        dest: "{{ grafana_provisioning_dir }}/datasources/prometheus.yml"
+        owner: grafana
+        group: grafana
+        mode: '0640'
+      notify: Restart Grafana
+      tags: [grafana, config]
+
+    # ----------------------------------------------------------
+    # Grafana – dashboard provisioning loader
+    # ----------------------------------------------------------
+    - name: Deploy Grafana dashboard provisioning config
+      template:
+        src: grafana_dashboard_provisioning.yml.j2
+        dest: "{{ grafana_provisioning_dir }}/dashboards/spendwise.yml"
+        owner: grafana
+        group: grafana
+        mode: '0640'
+      notify: Restart Grafana
+      tags: [grafana, config]
+
+    # ----------------------------------------------------------
+    # Grafana – SpendWise dashboard JSON
+    # ----------------------------------------------------------
+    - name: Deploy SpendWise Grafana dashboard
+      template:
+        src: grafana_dashboard.json.j2
+        dest: "{{ grafana_dashboards_dir }}/spendwise_overview.json"
+        owner: grafana
+        group: grafana
+        mode: '0640'
+      notify: Restart Grafana
+      tags: [grafana, dashboard]
+
+    # ----------------------------------------------------------
+    # Grafana – Alerting Configuration
+    # ----------------------------------------------------------
+    - name: Create Grafana alerting provisioning directory
+      file:
+        path: /etc/grafana/provisioning/alerting
+        state: directory
+        owner: grafana
+        group: grafana
+        mode: '0755'
+      tags: [grafana, alerting]
+
+    - name: Deploy Grafana alerting contact points and notification policies
+      template:
+        src: grafana_alerting.yml.j2
+        dest: /etc/grafana/provisioning/alerting/contactpoints.yml
+        owner: grafana
+        group: grafana
+        mode: '0644'
+      notify: Restart Grafana
+      tags: [grafana, alerting]
+
+    - name: Deploy Grafana alert rules
+      template:
+        src: grafana_alert_rules.yml.j2
+        dest: /etc/grafana/provisioning/alerting/rules.yml
+        owner: grafana
+        group: grafana
+        mode: '0644'
+      notify: Restart Grafana
+      tags: [grafana, alerting]
+
+    - name: Enable unified alerting in Grafana
+      lineinfile:
+        path: /etc/grafana/grafana.ini
+        regexp: '^#?unified_alerting_enabled\s*='
+        line: 'unified_alerting_enabled = true'
+        insertafter: '^\[alerting\]'
+        state: present
+      notify: Restart Grafana
+      tags: [grafana, alerting]
+
+    - name: Configure Grafana SMTP - enabled
+      lineinfile:
+        path: /etc/grafana/grafana.ini
+        regexp: '^[#;]?\s*enabled\s*='
+        line: 'enabled = true'
+        insertafter: '^\[smtp\]'
+        state: present
+      notify: Restart Grafana
+      tags: [grafana, smtp]
+
+    - name: Configure Grafana SMTP - host
+      lineinfile:
+        path: /etc/grafana/grafana.ini
+        regexp: '^[#;]?\s*host\s*='
+        line: 'host = smtp.gmail.com:587'
+        insertafter: '^\[smtp\]'
+        state: present
+      notify: Restart Grafana
+      tags: [grafana, smtp]
+
+    - name: Configure Grafana SMTP - user
+      lineinfile:
+        path: /etc/grafana/grafana.ini
+        regexp: '^[#;]?\s*user\s*='
+        line: 'user = livingstonelee360@gmail.com'
+        insertafter: '^\[smtp\]'
+        state: present
+      notify: Restart Grafana
+      tags: [grafana, smtp]
+
+    - name: Configure Grafana SMTP - password
+      lineinfile:
+        path: /etc/grafana/grafana.ini
+        regexp: '^[#;]?\s*password\s*='
+        line: 'password = {{ grafana_smtp_password }}'
+        insertafter: '^\[smtp\]'
+        state: present
+      notify: Restart Grafana
+      tags: [grafana, smtp]
+
+    - name: Configure Grafana SMTP - from_address
+      lineinfile:
+        path: /etc/grafana/grafana.ini
+        regexp: '^[#;]?\s*from_address\s*='
+        line: 'from_address = livingstonelee360@gmail.com'
+        insertafter: '^\[smtp\]'
+        state: present
+      notify: Restart Grafana
+      tags: [grafana, smtp]
+
+    - name: Configure Grafana SMTP - from_name
+      lineinfile:
+        path: /etc/grafana/grafana.ini
+        regexp: '^[#;]?\s*from_name\s*='
+        line: 'from_name = SpendWise Grafana Alerts'
+        insertafter: '^\[smtp\]'
+        state: present
+      notify: Restart Grafana
+      tags: [grafana, smtp]
+
+    - name: Configure Grafana SMTP - startTLS_policy
+      lineinfile:
+        path: /etc/grafana/grafana.ini
+        regexp: '^[#;]?\s*startTLS_policy\s*='
+        line: 'startTLS_policy = MandatoryStartTLS'
+        insertafter: '^\[smtp\]'
+        state: present
+      notify: Restart Grafana
+      tags: [grafana, smtp]
+
+    # ----------------------------------------------------------
+    # Grafana – systemd service
+    # ----------------------------------------------------------
+    - name: Enable and start Grafana service
+      service:
+        name: grafana-server
+        state: started
+        enabled: yes
+      tags: [grafana, service]
+
+    - name: Verify Grafana is listening on port 3000
+      wait_for:
+        host: "127.0.0.1"
+        port: 3000
+        timeout: 45
+      tags: [grafana, validate]
+
+    # ----------------------------------------------------------
+    # Clean up temp download artefacts
+    # ----------------------------------------------------------
+    - name: Remove Prometheus download archive
+      file:
+        path: "/tmp/prometheus-{{ prometheus_version }}.tar.gz"
+        state: absent
+      tags: [cleanup]
+
+    - name: Remove Prometheus extracted directory
+      file:
+        path: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64"
+        state: absent
+      tags: [cleanup]
+
+
+# ==============================================================
+# PLAY 2 – Node Exporter on Application Servers (Amazon Linux)
+# ==============================================================
+- name: Install Node Exporter on Application Servers
+  hosts: app_server
+  become: yes
+  gather_facts: yes
+
+  vars:
+    node_exporter_version: "{{ hostvars[inventory_hostname]['node_exporter_version'] | default('1.10.2') }}"
+    node_exporter_user: node_exporter
+    node_exporter_port: 9100
+
+  handlers:
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Restart Node Exporter
+      service:
+        name: node_exporter
+        state: restarted
+      listen: Restart Node Exporter
+
+  tasks:
+    # ----------------------------------------------------------
+    # Node Exporter – user, binary
+    # ----------------------------------------------------------
+    - name: Create node_exporter system user
+      user:
+        name: "{{ node_exporter_user }}"
+        system: yes
+        shell: /sbin/nologin
+        create_home: no
+        comment: "Prometheus Node Exporter"
+      tags: [node_exporter]
+
+    - name: Download Node Exporter archive
+      get_url:
+        url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+        dest: "/tmp/node_exporter-{{ node_exporter_version }}.tar.gz"
+        mode: '0644'
+        timeout: 120
+      register: node_exporter_download
+      retries: 5
+      delay: 15
+      until: node_exporter_download is succeeded
+      tags: [node_exporter]
+
+    - name: Extract Node Exporter archive
+      unarchive:
+        src: "/tmp/node_exporter-{{ node_exporter_version }}.tar.gz"
+        dest: /tmp/
+        remote_src: yes
+        creates: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+      tags: [node_exporter]
+
+    - name: Install node_exporter binary to /usr/local/bin
+      copy:
+        src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+        dest: /usr/local/bin/node_exporter
+        owner: "{{ node_exporter_user }}"
+        group: "{{ node_exporter_user }}"
+        mode: '0755'
+        remote_src: yes
+      notify: Restart Node Exporter
+      tags: [node_exporter]
+
+    # ----------------------------------------------------------
+    # Node Exporter – systemd service
+    # ----------------------------------------------------------
+    - name: Deploy Node Exporter systemd unit file
+      template:
+        src: node_exporter.service.j2
+        dest: /etc/systemd/system/node_exporter.service
+        mode: '0644'
+      notify:
+        - Reload systemd
+        - Restart Node Exporter
+      tags: [node_exporter, service]
+
+    - name: Enable and start Node Exporter service
+      service:
+        name: node_exporter
+        state: started
+        enabled: yes
+      tags: [node_exporter, service]
+
+    - name: Verify Node Exporter is listening on port 9100
+      wait_for:
+        host: "127.0.0.1"
+        port: "{{ node_exporter_port }}"
+        timeout: 20
+      tags: [node_exporter, validate]
+
+    # ----------------------------------------------------------
+    # Firewall – open Node Exporter port (firewalld on AL2023)
+    # ----------------------------------------------------------
+    - name: Check if firewalld is running
+      command: systemctl is-active firewalld
+      register: firewalld_status
+      changed_when: false
+      failed_when: false
+      tags: [node_exporter, firewall]
+
+    - name: Open Node Exporter port in firewalld
+      firewalld:
+        port: "{{ node_exporter_port }}/tcp"
+        permanent: yes
+        immediate: yes
+        state: enabled
+      when: firewalld_status.stdout == "active"
+      tags: [node_exporter, firewall]
+
+    # ----------------------------------------------------------
+    # Clean up
+    # ----------------------------------------------------------
+    - name: Remove Node Exporter download archive
+      file:
+        path: "/tmp/node_exporter-{{ node_exporter_version }}.tar.gz"
+        state: absent
+      tags: [cleanup]
+
+    - name: Remove Node Exporter extracted directory
+      file:
+        path: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64"
+        state: absent
+      tags: [cleanup]

@@ -1,0 +1,26 @@
+[Unit]
+Description=Prometheus Node Exporter – host-level metrics collector
+Documentation=https://prometheus.io/docs/guides/node-exporter/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User={{ node_exporter_user | default('node_exporter') }}
+Group={{ node_exporter_user | default('node_exporter') }}
+Restart=on-failure
+RestartSec=5s
+
+ExecStart=/usr/local/bin/node_exporter \
+  --web.listen-address=:{{ node_exporter_port | default(9100) }} \
+  --collector.filesystem.mount-points-exclude="^/(sys|proc|dev|host|etc)($$|/)" \
+  --collector.textfile.directory=/var/lib/node_exporter/textfile_collector \
+  --log.level=info
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

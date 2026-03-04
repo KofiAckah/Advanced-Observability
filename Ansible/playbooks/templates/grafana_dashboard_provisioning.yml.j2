@@ -1,0 +1,18 @@
+# ==============================================================
+# grafana_dashboard_provisioning.yml.j2
+# Tells Grafana where to load dashboard JSON files from disk
+# Managed by Ansible – DO NOT edit manually on the server
+# ==============================================================
+
+apiVersion: 1
+
+providers:
+  - name: "SpendWise Dashboards"
+    orgId: 1
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: "{{ grafana_dashboards_dir | default('/var/lib/grafana/dashboards') }}"
+      foldersFromFilesStructure: false

@@ -1,0 +1,199 @@
+# ==============================================================
+# alert_rules.yml.j2  –  Prometheus Alerting Rules
+# Managed by Ansible – DO NOT edit manually on the server
+# ==============================================================
+#
+# Assumed HTTP metric conventions (prometheus-client / Flask):
+#   http_requests_total{method, endpoint, http_status}
+#   http_request_duration_seconds{method, endpoint, le}
+#
+# If your app exposes different metric names, adjust the
+# `expr:` fields accordingly.
+# ==============================================================
+
+groups:
+
+  # ============================================================
+  # SpendWise Application Alerts
+  # ============================================================
+  - name: spendwise_application_alerts
+    interval: 30s
+    rules:
+
+      # ----------------------------------------------------------
+      # HIGH ERROR RATE  (>5 % of requests return 5xx)
+      # ----------------------------------------------------------
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{http_status=~"5.."}[5m])) by (instance, service)
+            /
+            sum(rate(http_requests_total[5m])) by (instance, service)
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          environment: "{{ app_env | default('dev') }}"
+          project: spendwise
+        annotations:
+          summary: "High HTTP error rate on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: >
+            Service {{ '{{' }} $labels.service {{ '}}' }} on {{ '{{' }} $labels.instance {{ '}}' }}
+            has a 5xx error rate of {{ '{{' }} $value | humanizePercentage {{ '}}' }}
+            (threshold: 5%) over the last 2 minutes.
+          runbook: "https://github.com/KofiAckah/SpendWise-Core-App/wiki/runbook#high-error-rate"
+
+      # ----------------------------------------------------------
+      # VERY HIGH ERROR RATE  (>20 %) – fire immediately
+      # ----------------------------------------------------------
+      - alert: CriticalErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{http_status=~"5.."}[5m])) by (instance, service)
+            /
+            sum(rate(http_requests_total[5m])) by (instance, service)
+          ) > 0.20
+        for: 0m
+        labels:
+          severity: page
+          environment: "{{ app_env | default('dev') }}"
+          project: spendwise
+        annotations:
+          summary: "CRITICAL error rate on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: >
+            Service {{ '{{' }} $labels.service {{ '}}' }} error rate is above 20 %.
+            Immediate action required.
+
+      # ----------------------------------------------------------
+      # HIGH P99 LATENCY  (>1 s over last 5 min)
+      # ----------------------------------------------------------
+      - alert: HighP99Latency
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (instance, service, le)
+          ) > 1.0
+        for: 3m
+        labels:
+          severity: warning
+          environment: "{{ app_env | default('dev') }}"
+          project: spendwise
+        annotations:
+          summary: "High P99 latency on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: >
+            P99 response time for {{ '{{' }} $labels.service {{ '}}' }} on
+            {{ '{{' }} $labels.instance {{ '}}' }} is {{ '{{' }} printf "%.3f" $value {{ '}}' }}s
+            (threshold: 1 s) over the last 3 minutes.
+
+      # ----------------------------------------------------------
+      # APPLICATION DOWN  (no metrics for > 1 min)
+      # ----------------------------------------------------------
+      - alert: SpendWiseAppDown
+        expr: |
+          up{job=~"spendwise_.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          environment: "{{ app_env | default('dev') }}"
+          project: spendwise
+        annotations:
+          summary: "SpendWise instance {{ '{{' }} $labels.instance {{ '}}' }} is unreachable"
+          description: >
+            Prometheus cannot scrape metrics from {{ '{{' }} $labels.instance {{ '}}' }}
+            (job: {{ '{{' }} $labels.job {{ '}}' }}).
+            The instance may be down or the /metrics endpoint is unavailable.
+
+      # ----------------------------------------------------------
+      # LOW REQUEST THROUGHPUT  (<1 req/s – possible traffic drop)
+      # ----------------------------------------------------------
+      - alert: LowRequestThroughput
+        expr: |
+          sum(rate(http_requests_total[5m])) by (instance, service) < 1
+        for: 5m
+        labels:
+          severity: warning
+          environment: "{{ app_env | default('dev') }}"
+          project: spendwise
+        annotations:
+          summary: "Low throughput on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: >
+            {{ '{{' }} $labels.service {{ '}}' }} is processing fewer than 1 req/s
+            (current: {{ '{{' }} printf "%.2f" $value {{ '}}' }} req/s).
+            Could indicate a traffic drop or service degradation.
+
+  # ============================================================
+  # Node / Infrastructure Alerts
+  # ============================================================
+  - name: spendwise_node_alerts
+    interval: 60s
+    rules:
+
+      # ----------------------------------------------------------
+      # NODE EXPORTER DOWN
+      # ----------------------------------------------------------
+      - alert: NodeExporterDown
+        expr: up{job="node_exporter"} == 0
+        for: 1m
+        labels:
+          severity: warning
+          environment: "{{ app_env | default('dev') }}"
+          project: spendwise
+        annotations:
+          summary: "Node Exporter unreachable on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: >
+            Node Exporter on {{ '{{' }} $labels.instance {{ '}}' }} has been down
+            for more than 1 minute. System metrics are unavailable.
+
+      # ----------------------------------------------------------
+      # HIGH CPU USAGE  (>85 % over 5 min)
+      # ----------------------------------------------------------
+      - alert: HighCpuUsage
+        expr: |
+          100 - (avg by(instance) (
+            rate(node_cpu_seconds_total{mode="idle"}[5m])
+          ) * 100) > 85
+        for: 5m
+        labels:
+          severity: warning
+          environment: "{{ app_env | default('dev') }}"
+          project: spendwise
+        annotations:
+          summary: "High CPU usage on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: >
+            CPU usage on {{ '{{' }} $labels.instance {{ '}}' }} has been above 85 %
+            for 5 minutes (current: {{ '{{' }} printf "%.1f" $value {{ '}}' }}%).
+
+      # ----------------------------------------------------------
+      # HIGH MEMORY USAGE  (>90 %)
+      # ----------------------------------------------------------
+      - alert: HighMemoryUsage
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+          environment: "{{ app_env | default('dev') }}"
+          project: spendwise
+        annotations:
+          summary: "High memory usage on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: >
+            Memory usage on {{ '{{' }} $labels.instance {{ '}}' }} is above 90 %
+            (current: {{ '{{' }} printf "%.1f" $value {{ '}}' }}%).
+
+      # ----------------------------------------------------------
+      # DISK USAGE  (>80 %)
+      # ----------------------------------------------------------
+      - alert: DiskSpaceLow
+        expr: |
+          (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}
+               / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          environment: "{{ app_env | default('dev') }}"
+          project: spendwise
+        annotations:
+          summary: "Low disk space on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: >
+            Disk usage on {{ '{{' }} $labels.instance {{ '}}' }}
+            (mount: {{ '{{' }} $labels.mountpoint {{ '}}' }}) is above 80 %
+            (current: {{ '{{' }} printf "%.1f" $value {{ '}}' }}%).

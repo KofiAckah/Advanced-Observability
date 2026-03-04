@@ -1,0 +1,27 @@
+# ==============================================================
+# grafana_alerting.yml.j2  –  Grafana contact points and notification policies
+# Managed by Ansible – DO NOT edit manually on the server
+# ==============================================================
+
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: SpendWise Alerts
+    receivers:
+      - uid: spendwise-email-notifier
+        type: email
+        settings:
+          addresses: livingstonelee360@gmail.com
+          singleEmail: false
+        disableResolveMessage: false
+
+policies:
+  - orgId: 1
+    receiver: SpendWise Alerts
+    group_by:
+      - alertname
+      - instance
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h

@@ -1,0 +1,22 @@
+# ==============================================================
+# grafana_datasource.yml.j2  –  Grafana datasource provisioning
+# Managed by Ansible – DO NOT edit manually on the server
+# ==============================================================
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: spendwise-prometheus
+    access: proxy
+    url: "http://localhost:9090"
+    isDefault: true
+    editable: false
+    jsonData:
+      httpMethod: POST
+      timeInterval: "15s"
+      queryTimeout: "60s"
+      # Enable exemplars if you instrument traces (optional)
+      exemplarTraceIdDestinations: []
+    version: 1

@@ -1,0 +1,376 @@
+---
+# ==============================================
+# SpendWise App Server Deployment Playbook
+# ==============================================
+# Clones SpendWise-Core-App, builds .env from AWS Parameter Store,
+# and starts the full stack via Docker Compose
+
+- name: Configure and Deploy SpendWise App Server
+  hosts: app_server
+  become: yes
+  gather_facts: yes
+
+  vars:
+    repo_url: "https://github.com/KofiAckah/SpendWise-Core-App.git"
+    dest_dir: "/home/ec2-user/SpendWise"
+
+  tasks:
+    # ==============================================
+    # System Update & Base Packages
+    # ==============================================
+    - name: Update all packages
+      dnf:
+        name: "*"
+        state: latest
+      tags: [system]
+
+    - name: Install Docker and Git
+      dnf:
+        name:
+          - docker
+          - git
+        state: present
+      tags: [system]
+
+    # ==============================================
+    # Docker Compose Plugin
+    # ==============================================
+    - name: Create Docker CLI plugins directory
+      file:
+        path: /usr/local/lib/docker/cli-plugins
+        state: directory
+        mode: '0755'
+      tags: [docker]
+
+    - name: Download Docker Compose plugin
+      get_url:
+        url: "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64"
+        dest: /usr/local/lib/docker/cli-plugins/docker-compose
+        mode: '0755'
+      tags: [docker]
+
+    - name: Download Docker Buildx plugin
+      get_url:
+        url: "https://github.com/docker/buildx/releases/download/v0.21.0/buildx-v0.21.0.linux-amd64"
+        dest: /usr/local/lib/docker/cli-plugins/docker-buildx
+        mode: '0755'
+      tags: [docker]
+
+    # ==============================================
+    # Docker Service Management
+    # ==============================================
+    - name: Start and enable Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+      tags: [docker]
+
+    - name: Add 'ec2-user' to 'docker' group
+      user:
+        name: ec2-user
+        groups: docker
+        append: yes
+      tags: [docker]
+
+    - name: Reset SSH connection to apply group changes
+      meta: reset_connection
+      tags: [docker]
+
+    # ==============================================
+    # Clone SpendWise Application
+    # ==============================================
+    - name: Check if SpendWise repository already exists
+      stat:
+        path: "{{ dest_dir }}"
+      register: repo_check
+      tags: [app]
+
+    - name: Remove existing repository if present
+      file:
+        path: "{{ dest_dir }}"
+        state: absent
+      when: repo_check.stat.exists
+      tags: [app]
+
+    - name: Clone SpendWise-Core-App repository
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ dest_dir }}"
+        version: main
+        force: yes
+      become: yes
+      become_user: ec2-user
+      tags: [app]
+
+    - name: Set correct ownership of application directory
+      file:
+        path: "{{ dest_dir }}"
+        owner: ec2-user
+        group: ec2-user
+        recurse: yes
+      tags: [app]
+
+    # ==============================================
+    # Retrieve Configuration from Parameter Store
+    # ==============================================
+    - name: Set environment and region facts
+      set_fact:
+        env_name: "{{ app_env | default('dev') }}"
+        region: "{{ aws_region | default('eu-central-1') }}"
+      tags: [config]
+
+    - name: Retrieve database name from Parameter Store
+      shell: |
+        aws ssm get-parameter --name "/monitor-spendwise/{{ env_name }}/db/name" \
+          --region {{ region }} --query 'Parameter.Value' --output text
+      register: db_name
+      changed_when: false
+      tags: [config]
+
+    - name: Retrieve database user from Parameter Store
+      shell: |
+        aws ssm get-parameter --name "/monitor-spendwise/{{ env_name }}/db/user" \
+          --region {{ region }} --with-decryption --query 'Parameter.Value' --output text
+      register: db_user
+      changed_when: false
+      no_log: true
+      tags: [config]
+
+    - name: Retrieve database password from Parameter Store
+      shell: |
+        aws ssm get-parameter --name "/monitor-spendwise/{{ env_name }}/db/password" \
+          --region {{ region }} --with-decryption --query 'Parameter.Value' --output text
+      register: db_password
+      changed_when: false
+      no_log: true
+      tags: [config]
+
+    - name: Retrieve backend port from Parameter Store
+      shell: |
+        aws ssm get-parameter --name "/monitor-spendwise/{{ env_name }}/app/backend_port" \
+          --region {{ region }} --query 'Parameter.Value' --output text
+      register: backend_port
+      changed_when: false
+      tags: [config]
+
+    - name: Retrieve database host from Parameter Store
+      shell: |
+        aws ssm get-parameter --name "/monitor-spendwise/{{ env_name }}/app/db_host" \
+          --region {{ region }} --query 'Parameter.Value' --output text
+      register: db_host
+      changed_when: false
+      tags: [config]
+
+    - name: Retrieve database port from Parameter Store
+      shell: |
+        aws ssm get-parameter --name "/monitor-spendwise/{{ env_name }}/app/db_port" \
+          --region {{ region }} --query 'Parameter.Value' --output text
+      register: db_port
+      changed_when: false
+      tags: [config]
+
+    - name: Retrieve compose project name from Parameter Store
+      shell: |
+        aws ssm get-parameter --name "/monitor-spendwise/{{ env_name }}/app/compose_project_name" \
+          --region {{ region }} --query 'Parameter.Value' --output text
+      register: compose_project
+      changed_when: false
+      tags: [config]
+
+    - name: Retrieve frontend port from Parameter Store
+      shell: |
+        aws ssm get-parameter --name "/monitor-spendwise/{{ env_name }}/app/frontend_port" \
+          --region {{ region }} --query 'Parameter.Value' --output text
+      register: frontend_port
+      changed_when: false
+      tags: [config]
+
+    # ==============================================
+    # Create .env File from Parameter Store Values
+    # ==============================================
+    - name: Create root .env file with configuration from Parameter Store
+      copy:
+        dest: "{{ dest_dir }}/.env"
+        content: |
+          ################################################################################
+          # SpendWise Application Environment Configuration
+          # Auto-generated by Ansible from AWS Parameter Store
+          # Environment: {{ env_name }}
+          ################################################################################
+
+          #------------------------------------------------------------------------------
+          # Database Configuration (PostgreSQL)
+          #------------------------------------------------------------------------------
+          POSTGRES_DB={{ db_name.stdout }}
+          POSTGRES_USER={{ db_user.stdout }}
+          POSTGRES_PASSWORD={{ db_password.stdout }}
+
+          #------------------------------------------------------------------------------
+          # Backend API Configuration
+          #------------------------------------------------------------------------------
+          PORT={{ backend_port.stdout }}
+          DB_HOST={{ db_host.stdout }}
+          DB_PORT={{ db_port.stdout }}
+          DB_NAME={{ db_name.stdout }}
+          DB_USER={{ db_user.stdout }}
+          DB_PASSWORD={{ db_password.stdout }}
+
+          #------------------------------------------------------------------------------
+          # Frontend Configuration
+          #------------------------------------------------------------------------------
+          VITE_API_URL=http://{{ ansible_host }}:{{ backend_port.stdout }}
+
+          #------------------------------------------------------------------------------
+          # Docker Configuration
+          #------------------------------------------------------------------------------
+          COMPOSE_PROJECT_NAME={{ compose_project.stdout }}
+
+          ################################################################################
+          # End of Configuration
+          ################################################################################
+        owner: ec2-user
+        group: ec2-user
+        mode: '0600'
+      no_log: true
+      tags: [config]
+
+    # ==============================================
+    # Create frontend .env for VITE_API_URL (build-time variable)
+    # ==============================================
+    # The frontend Dockerfile has no ARG VITE_API_URL, so docker-compose build args
+    # are silently ignored. Vite reads .env files via COPY . . during npm run build.
+    - name: Create frontend .env file with API URL for Vite build
+      copy:
+        dest: "{{ dest_dir }}/frontend/.env"
+        content: |
+          # Auto-generated by Ansible — tells the React app where the backend lives
+          VITE_API_URL=http://{{ ansible_host }}:{{ backend_port.stdout }}
+        owner: ec2-user
+        group: ec2-user
+        mode: '0644'
+      tags: [config]
+
+    - name: Display configuration summary
+      debug:
+        msg:
+          - "Configuration retrieved from Parameter Store:"
+          - "  Environment : {{ env_name }}"
+          - "  Database    : {{ db_name.stdout }}"
+          - "  Backend Port: {{ backend_port.stdout }}"
+          - "  Frontend Port: {{ frontend_port.stdout }}"
+          - "  API URL     : http://{{ ansible_host }}:{{ backend_port.stdout }}"
+      tags: [config]
+
+    # ==============================================
+    # CloudWatch Logging Override
+    # Creates docker-compose.override.yml which Docker Compose v2 merges
+    # automatically with docker-compose.yml — no edits to the app repo needed.
+    # All three services write logs to CloudWatch log group /spendwise/app.
+    # ==============================================
+    - name: Deploy docker-compose.override.yml for CloudWatch logging
+      copy:
+        dest: "{{ dest_dir }}/docker-compose.override.yml"
+        owner: ec2-user
+        group: ec2-user
+        mode: '0644'
+        content: |
+          # Auto-generated by Ansible — CloudWatch awslogs driver override
+          # Merged automatically by Docker Compose v2 with docker-compose.yml
+          # Log group: /spendwise/app  |  Region: eu-central-1
+
+          services:
+            backend:
+              logging:
+                driver: awslogs
+                options:
+                  awslogs-region: eu-central-1
+                  awslogs-group: /spendwise/app
+                  awslogs-stream: backend
+
+            frontend:
+              logging:
+                driver: awslogs
+                options:
+                  awslogs-region: eu-central-1
+                  awslogs-group: /spendwise/app
+                  awslogs-stream: frontend
+
+            postgres:
+              logging:
+                driver: awslogs
+                options:
+                  awslogs-region: eu-central-1
+                  awslogs-group: /spendwise/app
+                  awslogs-stream: postgres
+      tags: [config, logging]
+
+    # ==============================================
+    # Docker Compose Deployment
+    # ==============================================
+    - name: Stop any existing containers
+      command:
+        cmd: docker compose down
+        chdir: "{{ dest_dir }}"
+      become: yes
+      become_user: ec2-user
+      ignore_errors: yes
+      tags: [deploy]
+
+    - name: Build and start application with Docker Compose
+      command:
+        cmd: docker compose up -d --build
+        chdir: "{{ dest_dir }}"
+      become: yes
+      become_user: ec2-user
+      tags: [deploy]
+
+    - name: Wait for containers to be healthy
+      pause:
+        seconds: 15
+      tags: [deploy]
+
+    # ==============================================
+    # Verify Deployment
+    # ==============================================
+    - name: Check running Docker containers
+      command: docker ps
+      become: yes
+      become_user: ec2-user
+      register: docker_ps
+      changed_when: false
+      tags: [verify]
+
+    - name: Display running containers
+      debug:
+        msg: "{{ docker_ps.stdout_lines }}"
+      tags: [verify]
+
+    - name: Health check - backend API
+      uri:
+        url: "http://localhost:{{ backend_port.stdout }}/api/health"
+        method: GET
+        status_code: 200
+      register: health_check
+      retries: 5
+      delay: 10
+      ignore_errors: yes
+      tags: [verify]
+
+    # ==============================================
+    # Deployment Summary
+    # ==============================================
+    - name: Display deployment information
+      debug:
+        msg:
+          - "================================================"
+          - "SpendWise Application Deployed Successfully!"
+          - "================================================"
+          - "Web Application : http://{{ ansible_host }}"
+          - "Backend API     : http://{{ ansible_host }}:{{ backend_port.stdout }}"
+          - "API Health      : http://{{ ansible_host }}:{{ backend_port.stdout }}/api/health"
+          - "Frontend Dev    : http://{{ ansible_host }}:{{ frontend_port.stdout }}"
+          - "Repository      : {{ repo_url }}"
+          - "Install Dir     : {{ dest_dir }}"
+          - "================================================"
+      tags: [summary]
