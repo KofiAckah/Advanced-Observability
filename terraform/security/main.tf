@@ -107,38 +107,14 @@ resource "aws_security_group_rule" "app_vite" {
 # Monitoring Security Group
 # Prometheus (9090), Grafana (3000), SSH (22)
 # Node Exporter scrape (9100) FROM monitoring SG
+#
+# NOTE: All ingress rules are standalone aws_security_group_rule resources
+# below to avoid Terraform conflicts when mixing inline and standalone rules.
 # ==============================================
 resource "aws_security_group" "monitoring_sg" {
   name        = "${var.project_name}-${var.environment}-monitoring-sg"
   description = "Security group for Prometheus + Grafana monitoring server"
   vpc_id      = var.vpc_id
-
-  # SSH – locked to your IP for administration
-  ingress {
-    description = "SSH from allowed IP"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.ssh_allowed_ip]
-  }
-
-  # Prometheus UI
-  ingress {
-    description = "Prometheus UI"
-    from_port   = 9090
-    to_port     = 9090
-    protocol    = "tcp"
-    cidr_blocks = [var.ssh_allowed_ip]
-  }
-
-  # Grafana UI
-  ingress {
-    description = "Grafana UI"
-    from_port   = 3000
-    to_port     = 3000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
 
   egress {
     from_port   = 0
@@ -153,7 +129,41 @@ resource "aws_security_group" "monitoring_sg" {
   }
 }
 
+# SSH – locked to your admin IP
+resource "aws_security_group_rule" "monitoring_ssh_from_admin" {
+  type              = "ingress"
+  description       = "SSH from allowed IP (admin)"
+  from_port         = 22
+  to_port           = 22
+  protocol          = "tcp"
+  cidr_blocks       = [var.ssh_allowed_ip]
+  security_group_id = aws_security_group.monitoring_sg.id
+}
+
+# Prometheus UI
+resource "aws_security_group_rule" "monitoring_prometheus_ui" {
+  type              = "ingress"
+  description       = "Prometheus UI"
+  from_port         = 9090
+  to_port           = 9090
+  protocol          = "tcp"
+  cidr_blocks       = [var.ssh_allowed_ip]
+  security_group_id = aws_security_group.monitoring_sg.id
+}
+
+# Grafana UI (public)
+resource "aws_security_group_rule" "monitoring_grafana_ui" {
+  type              = "ingress"
+  description       = "Grafana UI"
+  from_port         = 3000
+  to_port           = 3000
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.monitoring_sg.id
+}
+
 # Allow Jenkins to SSH into monitoring server (needed for Stage 12 — Update Prometheus ECS Target)
+# Uses private IP routing within the VPC — no internet gateway involved.
 resource "aws_security_group_rule" "monitoring_ssh_from_jenkins" {
   type                     = "ingress"
   description              = "SSH from Jenkins Server (pipeline Stage 12)"

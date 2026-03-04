@@ -49,6 +49,26 @@ fi
 
 echo "ECS backend private IP: ${ECS_IP}"
 
+# --- Resolve monitoring server private IP (intra-VPC — no internet routing) ---
+# Using private IP avoids any dependency on public IP reachability or internet
+# gateway routing. The Jenkins SG → monitoring SG security group rule handles
+# the intra-VPC access control.
+MONITORING_PRIVATE_IP=$(aws ec2 describe-instances \
+    --region "${AWS_REGION}" \
+    --filters \
+        "Name=tag:Name,Values=${PROJECT_NAME}-${ENVIRONMENT}-monitoring-server" \
+        "Name=instance-state-name,Values=running" \
+    --query 'Reservations[0].Instances[0].PrivateIpAddress' \
+    --no-cli-pager \
+    --output text)
+
+if [ -z "${MONITORING_PRIVATE_IP}" ] || [ "${MONITORING_PRIVATE_IP}" = "None" ]; then
+    echo "❌ Could not find running monitoring server (tag: ${PROJECT_NAME}-${ENVIRONMENT}-monitoring-server)"
+    exit 1
+fi
+
+echo "Monitoring server private IP: ${MONITORING_PRIVATE_IP}"
+
 # --- Write new ecs_targets.json on the monitoring server ---
 # Prometheus file_sd_configs auto-reloads this file every 30 s.
 # No Prometheus restart needed.
@@ -57,7 +77,7 @@ TARGETS_JSON=$(printf '[{"targets":["%s:5000"],"labels":{"service":"spendwise-ba
 ssh -o StrictHostKeyChecking=no \
     -o ConnectTimeout=15 \
     -i "${MONITORING_KEY}" \
-    ubuntu@54.247.224.53 \
+    ubuntu@"${MONITORING_PRIVATE_IP}" \
     "echo '${TARGETS_JSON}' | sudo tee /etc/prometheus/ecs_targets.json > /dev/null && echo '✅ ecs_targets.json updated'"
 
 echo "✅ Prometheus will scrape ${ECS_IP}:5000 within 30 seconds"
