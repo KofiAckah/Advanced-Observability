@@ -57,7 +57,7 @@ TARGETS_JSON=$(printf '[{"targets":["%s:5000"],"labels":{"service":"spendwise-ba
 ssh -o StrictHostKeyChecking=no \
     -o ConnectTimeout=15 \
     -i "${MONITORING_KEY}" \
-    ubuntu@52.57.3.18 \
+    ubuntu@54.247.224.53 \
     "echo '${TARGETS_JSON}' | sudo tee /etc/prometheus/ecs_targets.json > /dev/null && echo '✅ ecs_targets.json updated'"
 
 echo "✅ Prometheus will scrape ${ECS_IP}:5000 within 30 seconds"
