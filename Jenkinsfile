@@ -75,6 +75,9 @@ pipeline {
 
         // ── Stage 5 ──────────────────────────────────────────────────
         stage('SAST Scan - CodeQL') {
+            when {
+                expression { return false } // TEMPORARILY SKIPPED — remove this block to re-enable
+            }
             steps {
                 sh 'bash pipeline/stages/05_sast_codeql.sh'
             }

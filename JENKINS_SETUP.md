@@ -1,23 +1,25 @@
-# Jenkins Setup Guide — SpendWise CI/CD Pipeline
+# Jenkins Setup Guide — Advanced SpendWise CI/CD Pipeline
 
 This guide walks you through configuring Jenkins after Ansible has provisioned the server.  
-By the end you will have a working pipeline that:  
-1. Runs backend tests on every push  
-2. Builds and pushes Docker images to AWS ECR  
-3. Deploys automatically to the App Server  
+By the end you will have a working pipeline that:
+1. Runs backend tests on every push
+2. Scans secrets (Gitleaks), dependencies (Snyk), code (CodeQL), images (Trivy), and generates an SBOM (Syft)
+3. Builds and pushes Docker images to AWS ECR
+4. Runs DB migrations and deploys to ECS Fargate
+5. Updates Prometheus ECS scrape targets after every deploy
 
 ---
 
 ## 📋 Table of Contents
 
 - [Prerequisites](#prerequisites)
+- [Step 0 — Provision Jenkins Server with Ansible](#step-0--provision-jenkins-server-with-ansible)
 - [Step 1 — Access Jenkins](#step-1--access-jenkins)
 - [Step 2 — Complete the Setup Wizard](#step-2--complete-the-setup-wizard)
 - [Step 3 — Install Additional Plugins](#step-3--install-additional-plugins)
 - [Step 4 — Configure Credentials](#step-4--configure-credentials)
-- [Step 5 — Install Node.js on Jenkins Server](#step-5--install-nodejs-on-jenkins-server)
-- [Step 6 — Create the Pipeline Job](#step-6--create-the-pipeline-job)
-- [Step 7 — Run the Pipeline](#step-7--run-the-pipeline)
+- [Step 5 — Create the Pipeline Job](#step-5--create-the-pipeline-job)
+- [Step 6 — Run the Pipeline](#step-6--run-the-pipeline)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -27,10 +29,37 @@ By the end you will have a working pipeline that:
 Before starting, make sure you have:
 
 - ✅ Terraform applied (`terraform apply -var-file=dev.tfvars`)
-- ✅ Ansible Jenkins playbook run (`ansible-playbook playbooks/jenkins.yml`)
-- ✅ Ansible App playbook run (`ansible-playbook playbooks/app.yml`)
 - ✅ `SpendWise-KP.pem` key available in the `Ansible/` directory
 - ✅ Your AWS Account ID (run: `aws sts get-caller-identity --query Account --output text`)
+- ✅ A Snyk account and API token from [app.snyk.io/account](https://app.snyk.io/account)
+
+---
+
+## Step 0 — Provision Jenkins Server with Ansible
+
+Run the Jenkins playbook **before** accessing the UI. It installs and configures:
+
+| Tool | Version / Notes |
+|------|-----------------|
+| **Jenkins** | Latest stable RPM |
+| **Java 17** | Amazon Corretto |
+| **Docker + Compose + Buildx** | Latest |
+| **Node.js + npm** | Latest via dnf |
+| **Git** | Latest |
+| **CodeQL CLI** | Bundle v2.17.6 (at `/opt/codeql-cli/codeql/codeql`) |
+
+```bash
+cd Ansible
+ansible-playbook playbooks/jenkins.yml
+```
+
+Also run the app playbook to install Node Exporter on the App Server:
+
+```bash
+ansible-playbook playbooks/app.yml
+```
+
+> **Note:** Trivy, Syft, and Gitleaks run via Docker inside the pipeline — no manual installation needed.
 
 ---
 
@@ -82,6 +111,7 @@ Search and install each of the following:
 | **Docker Pipeline** | Enables Docker commands inside pipeline stages |
 | **SSH Agent** | Allows `sshagent([...])` to inject SSH keys securely |
 | **AWS Credentials** | Stores AWS secrets safely in Jenkins |
+| **Credentials Binding** | Injects secrets via `withCredentials([string(...)])` — required for Snyk token |
 
 After installing, tick **"Restart Jenkins when installation is complete"**.
 
@@ -113,7 +143,7 @@ Click **Create**.
 |-------|-------|
 | **Kind** | SSH Username with private key |
 | **ID** | `ec2-ssh-key` |
-| **Description** | EC2 SSH Key for App Server |
+| **Description** | EC2 SSH Key for App Server and Monitoring Server |
 | **Username** | `ec2-user` |
 | **Private Key** | Select **"Enter directly"** → click **Add** |
 
@@ -130,13 +160,31 @@ Click **Create**.
 
 ---
 
-### C. Verify Both Credentials Exist
+### C. Add Snyk API Token
 
-After adding both, your credentials list should show:
+The pipeline uses Snyk in **Stage 4 (SCA Scan)** to detect HIGH/CRITICAL vulnerabilities in backend dependencies.
+
+> Get your token from: **[app.snyk.io → Account Settings → Auth Token](https://app.snyk.io/account)**
+
+| Field | Value |
+|-------|-------|
+| **Kind** | Secret text |
+| **Secret** | Your Snyk API token (40-character hex string) |
+| **ID** | `snyk-token` |
+| **Description** | Snyk API token for SCA dependency scanning |
+
+Click **Create**.
+
+---
+
+### D. Verify All Credentials Exist
+
+After adding all credentials, your list should show:
 
 ```
 aws-account-id   [Secret text]
 ec2-ssh-key      [SSH Username with private key]
+snyk-token       [Secret text]
 ```
 
 ---
@@ -180,16 +228,37 @@ Click **Save**.
 
 ### Expected Stages
 
-| Stage | What It Does |
-|-------|-------------|
-| ✅ **Checkout** | Clones `SpendWise-Core-App` into workspace |
-| ✅ **Get App Server IP** | Queries AWS for the app server's private & public IPs |
-| ✅ **Run Backend Tests** | Runs `npm test` inside `backend/` |
-| ✅ **Build Docker Images** | Builds `backend` and `frontend` images with build tag |
-| ✅ **Push to ECR** | Authenticates with ECR and pushes both images |
-| ✅ **Deploy to App Server** | SSHs to app server, pulls images, restarts with new compose override |
-| ✅ **Verify Deployment** | Runs `docker ps` and hits `/api/health` endpoint |
-| ✅ **Cleanup Old Images** | Keeps last 3 builds on Jenkins server |
+| Stage | Tool | What It Does |
+|-------|------|--------------|
+| ✅ **Checkout** | Git | Clones `SpendWise-Core-App` source code |
+| ✅ **Secret Scan** | Gitleaks (Docker) | Blocks pipeline if hardcoded secrets found |
+| ✅ **Run Backend Tests** | npm test | Runs unit tests inside `backend/` |
+| ✅ **SCA Scan** | Snyk | Scans dependencies for HIGH/CRITICAL CVEs |
+| ✅ **SAST Scan** | CodeQL | Static analysis on backend JavaScript code |
+| ✅ **Build Docker Images** | Docker Buildx | Builds `backend` and `frontend` images |
+| ✅ **Image Scan** | Trivy (Docker) | Scans built images for vulnerabilities |
+| ✅ **Generate SBOM** | Syft (Docker) | Creates CycloneDX SBOM for both images |
+| ✅ **Push to ECR** | AWS CLI | Authenticates and pushes both images |
+| ✅ **DB Migration** | ECS task | Runs Alembic/Prisma migrations against RDS |
+| ✅ **Deploy to ECS** | AWS CLI | Registers new task definition and updates service |
+| ✅ **Verify ECS Deployment** | AWS CLI | Polls until tasks are stable (8 min timeout) |
+| ✅ **Update Prometheus Target** | SSH | Rewrites `ecs_targets.json` on monitoring server |
+| ✅ **Cleanup Old Images** | Docker | Prunes dangling images on Jenkins server |
+
+### Security Reports
+
+All scan reports are archived as build artefacts:
+
+| Artefact | Stage |
+|----------|-------|
+| `security-reports/gitleaks-report.json` | Secret Scan |
+| `security-reports/snyk-report.json` | SCA Scan |
+| `security-reports/codeql-results.sarif` | SAST Scan |
+| `security-reports/trivy-backend-report.json` | Image Scan |
+| `security-reports/trivy-frontend-report.json` | Image Scan |
+| `security-reports/sbom-backend.json` | SBOM |
+| `security-reports/sbom-frontend.json` | SBOM |
+| `security-reports/task-definition-rendered.json` | ECS Deploy |
 
 ### Accessing the Deployed App
 
@@ -255,7 +324,12 @@ sudo systemctl restart jenkins
 
 **Symptom:** Run Backend Tests stage fails with `npm: command not found`
 
-**Solution:** Install Node.js (see [Step 5](#step-5--install-nodejs-on-jenkins-server)).
+**Solution:** Re-run the Ansible Jenkins playbook — it installs Node.js and npm via dnf:
+
+```bash
+cd Ansible
+ansible-playbook playbooks/jenkins.yml
+```
 
 ---
 
@@ -277,17 +351,59 @@ If empty, re-run `terraform apply` — the EC2 instance profile may not have bee
 
 ### Issue 6: App Server IP Returns `None`
 
-**Symptom:** `Could not find running App Server with tag: monitor-spendwise-dev-app-server`
+**Symptom:** `Could not find running App Server with tag: advanced-monitor-spendwise-dev-app-server`
 
 **Solution:** The App Server EC2 instance may be stopped:
 
 ```bash
 cd terraform
 terraform output app_instance_id
-# Then: aws ec2 start-instances --instance-ids <id> --region eu-central-1
+# Then: aws ec2 start-instances --instance-ids <id> --region eu-west-1
 ```
 
 Or re-run `terraform apply -var-file=dev.tfvars` to ensure all instances are running.
+
+---
+
+### Issue 7: `snyk-token` Credential Not Found
+
+**Symptom:** `CredentialNotFoundException: Could not find credentials with id 'snyk-token'`
+
+**Solution:** Add the Snyk token in Jenkins (see [Step 4C](#c-add-snyk-api-token)).
+
+Get your token from: [app.snyk.io → Account Settings → Auth Token](https://app.snyk.io/account)
+
+---
+
+### Issue 8: CodeQL Fails (`/opt/codeql-cli/codeql/codeql: No such file or directory`)
+
+**Symptom:** Stage 5 (SAST Scan) fails with file not found.
+
+**Solution:** Re-run the Ansible Jenkins playbook — it downloads and installs the CodeQL bundle:
+
+```bash
+cd Ansible
+ansible-playbook playbooks/jenkins.yml
+```
+
+Verify installation:
+
+```bash
+JENKINS_IP=$(cd terraform && terraform output -raw jenkins_public_ip)
+ssh -i Ansible/SpendWise-KP.pem ec2-user@$JENKINS_IP \
+  "codeql --version"
+```
+
+---
+
+### Issue 9: Snyk Scan Error (`exit code 2`)
+
+**Symptom:** Stage 4 fails with `Snyk scan error — check token validity and network access`
+
+**Solution:**
+1. Verify the token is valid at [app.snyk.io/account](https://app.snyk.io/account)
+2. Check the Jenkins server has internet access (it needs to reach `snyk.io`)
+3. Inspect the report: `security-reports/snyk-report.json` in build artefacts
 
 ---
 
