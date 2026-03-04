@@ -153,6 +153,17 @@ resource "aws_security_group" "monitoring_sg" {
   }
 }
 
+# Allow Jenkins to SSH into monitoring server (needed for Stage 12 — Update Prometheus ECS Target)
+resource "aws_security_group_rule" "monitoring_ssh_from_jenkins" {
+  type                     = "ingress"
+  description              = "SSH from Jenkins Server (pipeline Stage 12)"
+  from_port                = 22
+  to_port                  = 22
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.jenkins_sg.id
+  security_group_id        = aws_security_group.monitoring_sg.id
+}
+
 # Allow Prometheus (monitoring server) to scrape Node Exporter on app servers (port 9100)
 # Uses VPC CIDR to handle both private-IP and public-IP routing within the same VPC.
 resource "aws_security_group_rule" "app_node_exporter_from_monitoring" {
