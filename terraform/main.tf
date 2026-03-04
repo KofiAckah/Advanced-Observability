@@ -117,6 +117,7 @@ module "ecs" {
   frontend_image     = module.ecr.frontend_repository_url
   image_tag          = var.image_tag
   db_name            = var.db_name
+  jaeger_endpoint    = "http://${module.compute.monitoring_private_ip}:4318"
 }
 
 # ==============================================================

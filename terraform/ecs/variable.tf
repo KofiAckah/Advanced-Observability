@@ -39,6 +39,12 @@ variable "image_tag" {
   default     = "latest"
 }
 
+variable "jaeger_endpoint" {
+  description = "OTLP HTTP endpoint for Jaeger trace ingest (e.g. http://<monitoring-private-ip>:4318)"
+  type        = string
+  default     = "http://localhost:4318"
+}
+
 variable "db_name" {
   description = "Database name for backend environment variable"
   type        = string

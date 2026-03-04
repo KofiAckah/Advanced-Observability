@@ -174,6 +174,39 @@ resource "aws_security_group_rule" "monitoring_ssh_from_jenkins" {
   security_group_id        = aws_security_group.monitoring_sg.id
 }
 
+# Jaeger UI – accessible from admin IP only
+resource "aws_security_group_rule" "monitoring_jaeger_ui" {
+  type              = "ingress"
+  description       = "Jaeger UI (port 16686)"
+  from_port         = 16686
+  to_port           = 16686
+  protocol          = "tcp"
+  cidr_blocks       = [var.ssh_allowed_ip]
+  security_group_id = aws_security_group.monitoring_sg.id
+}
+
+# OTLP HTTP ingest – ECS tasks inside VPC send traces to Jaeger (port 4318)
+resource "aws_security_group_rule" "monitoring_otlp_http" {
+  type              = "ingress"
+  description       = "OTLP HTTP trace ingest from VPC (ECS → Jaeger)"
+  from_port         = 4318
+  to_port           = 4318
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.monitoring_sg.id
+}
+
+# OTLP gRPC ingest – ECS tasks inside VPC send traces to Jaeger (port 4317)
+resource "aws_security_group_rule" "monitoring_otlp_grpc" {
+  type              = "ingress"
+  description       = "OTLP gRPC trace ingest from VPC (ECS → Jaeger)"
+  from_port         = 4317
+  to_port           = 4317
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.monitoring_sg.id
+}
+
 # Allow Prometheus (monitoring server) to scrape Node Exporter on app servers (port 9100)
 # Uses VPC CIDR to handle both private-IP and public-IP routing within the same VPC.
 resource "aws_security_group_rule" "app_node_exporter_from_monitoring" {

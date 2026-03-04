@@ -72,3 +72,13 @@ scrape_configs:
         target_label: instance
         regex:        "([^:]+)(?::\\d+)?"
         replacement:  "$1"
+
+  # ---- Jaeger internal metrics (port 14269 on monitoring server) ---
+  - job_name: "jaeger"
+    metrics_path: /metrics
+    scrape_interval: 30s
+    static_configs:
+      - targets: ["localhost:14269"]
+        labels:
+          service: "jaeger"
+          environment: "{{ app_env | default('dev') }}"

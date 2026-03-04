@@ -17,6 +17,17 @@ datasources:
       httpMethod: POST
       timeInterval: "15s"
       queryTimeout: "60s"
-      # Enable exemplars if you instrument traces (optional)
-      exemplarTraceIdDestinations: []
+      # Link Prometheus exemplars to Jaeger traces
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: spendwise-jaeger
+    version: 1
+
+  - name: Jaeger
+    type: jaeger
+    uid: spendwise-jaeger
+    access: proxy
+    url: "http://localhost:16686"
+    isDefault: false
+    editable: false
     version: 1

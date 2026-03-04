@@ -653,6 +653,32 @@
       ],
       "title": "Disk Usage (root fs)",
       "type": "gauge"
+    },
+
+    {
+      "datasource": {"type": "jaeger", "uid": "spendwise-jaeger"},
+      "description": "Click a trace below to open it in the Jaeger UI. Filter by service=spendwise-backend or use the search bar above.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {"h": 12, "w": 24, "x": 0, "y": 34},
+      "id": 30,
+      "options": {
+        "frameType": "TRACE_RESULT"
+      },
+      "targets": [
+        {
+          "datasource": {"type": "jaeger", "uid": "spendwise-jaeger"},
+          "query": "",
+          "queryType": "search",
+          "refId": "A",
+          "service": "spendwise-backend",
+          "limit": 20
+        }
+      ],
+      "title": "Distributed Traces – SpendWise Backend (Jaeger)",
+      "type": "traces"
     }
 
   ]

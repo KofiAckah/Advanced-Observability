@@ -456,6 +456,60 @@
         state: absent
       tags: [cleanup]
 
+    # ----------------------------------------------------------
+    # Jaeger – all-in-one container (traces backend + UI)
+    # Ports:
+    #   4317  – OTLP gRPC ingest  (ECS containers → Jaeger)
+    #   4318  – OTLP HTTP ingest  (ECS containers → Jaeger)
+    #  16686  – Jaeger UI
+    #  14269  – Jaeger internal metrics (Prometheus scrapes this)
+    # ----------------------------------------------------------
+    - name: Install Docker (required to run Jaeger container)
+      apt:
+        name:
+          - docker.io
+          - python3-docker
+        state: present
+        update_cache: yes
+      tags: [jaeger]
+
+    - name: Ensure Docker service is started and enabled
+      service:
+        name: docker
+        state: started
+        enabled: yes
+      tags: [jaeger]
+
+    - name: Pull Jaeger all-in-one image
+      community.docker.docker_image:
+        name: jaegertracing/all-in-one
+        tag: "1.57"
+        source: pull
+      tags: [jaeger]
+
+    - name: Run Jaeger all-in-one container
+      community.docker.docker_container:
+        name: jaeger
+        image: jaegertracing/all-in-one:1.57
+        restart_policy: unless-stopped
+        published_ports:
+          - "4317:4317"    # OTLP gRPC
+          - "4318:4318"    # OTLP HTTP
+          - "16686:16686"  # Jaeger UI
+          - "14269:14269"  # Jaeger internal /metrics
+        env:
+          COLLECTOR_OTLP_ENABLED: "true"
+          SPAN_STORAGE_TYPE: "memory"
+        state: started
+      tags: [jaeger]
+
+    - name: Wait for Jaeger UI to be available
+      wait_for:
+        host: "127.0.0.1"
+        port: 16686
+        timeout: 30
+      tags: [jaeger, validate]
+
 
 # ==============================================================
 # PLAY 2 – Node Exporter on Application Servers (Amazon Linux)

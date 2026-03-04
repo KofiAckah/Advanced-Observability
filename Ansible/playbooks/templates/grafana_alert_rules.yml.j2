@@ -53,7 +53,7 @@ groups:
               type: threshold
         noDataState: NoData
         execErrState: Error
-        for: 2m
+        for: 10m
         annotations:
           summary: High error rate detected on SpendWise
           description: "SpendWise is experiencing a high error rate. Current value: {% raw %}{{ $values.A.Value }}{% endraw %}%"
@@ -84,7 +84,7 @@ groups:
               conditions:
                 - evaluator:
                     params:
-                      - 1000
+                      - 300
                     type: gt
                   operator:
                     type: and
@@ -102,10 +102,10 @@ groups:
               type: threshold
         noDataState: NoData
         execErrState: Error
-        for: 5m
+        for: 10m
         annotations:
           summary: High latency detected on SpendWise
-          description: "SpendWise P95 latency is above threshold. Current value: {% raw %}{{ $values.A.Value }}{% endraw %}ms"
+          description: "SpendWise P95 latency is above 300 ms. Current value: {% raw %}{{ $values.A.Value }}{% endraw %}ms"
         labels:
           severity: warning
 

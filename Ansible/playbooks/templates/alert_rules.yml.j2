@@ -26,11 +26,11 @@ groups:
       - alert: HighErrorRate
         expr: |
           (
-            sum(rate(http_requests_total{http_status=~"5.."}[5m])) by (instance, service)
+            sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (instance, service)
             /
             sum(rate(http_requests_total[5m])) by (instance, service)
           ) > 0.05
-        for: 2m
+        for: 10m
         labels:
           severity: critical
           environment: "{{ app_env | default('dev') }}"
@@ -49,7 +49,7 @@ groups:
       - alert: CriticalErrorRate
         expr: |
           (
-            sum(rate(http_requests_total{http_status=~"5.."}[5m])) by (instance, service)
+            sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (instance, service)
             /
             sum(rate(http_requests_total[5m])) by (instance, service)
           ) > 0.20
@@ -71,8 +71,8 @@ groups:
         expr: |
           histogram_quantile(0.99,
             sum(rate(http_request_duration_seconds_bucket[5m])) by (instance, service, le)
-          ) > 1.0
-        for: 3m
+          ) > 0.3
+        for: 10m
         labels:
           severity: warning
           environment: "{{ app_env | default('dev') }}"
@@ -82,7 +82,7 @@ groups:
           description: >
             P99 response time for {{ '{{' }} $labels.service {{ '}}' }} on
             {{ '{{' }} $labels.instance {{ '}}' }} is {{ '{{' }} printf "%.3f" $value {{ '}}' }}s
-            (threshold: 1 s) over the last 3 minutes.
+            (threshold: 300 ms) over the last 10 minutes.
 
       # ----------------------------------------------------------
       # APPLICATION DOWN  (no metrics for > 1 min)

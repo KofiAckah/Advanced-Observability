@@ -33,6 +33,11 @@ output "app_server_private_ip" {
   value       = aws_instance.app_server.private_ip
 }
 
+output "monitoring_private_ip" {
+  description = "Private IP of the Monitoring Server – used by ECS containers to send OTLP traces to Jaeger"
+  value       = aws_instance.monitoring_server.private_ip
+}
+
 output "iam_role_name" {
   description = "IAM role attached to the app server EC2 instance"
   value       = aws_iam_role.spendwise_ec2_role.name

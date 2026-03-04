@@ -183,6 +183,19 @@ pipeline {
             }
         }
 
+        // ── Stage 14 ─────────────────────────────────────────────────
+        // Load test using k6. Skipped by default — enable by removing the
+        // when { } block to run a manual load-test against the live ECS URL.
+        // Generates RED metrics in Prometheus + real traces in Jaeger.
+        stage('Load Test') {
+            when { expression { return false } }
+            steps {
+                sh 'bash pipeline/stages/14_load_test.sh'
+                archiveArtifacts artifacts: 'security-reports/load_test_summary.json',
+                                 allowEmptyArchive: true
+            }
+        }
+
     }
 
     // ── Post-build ───────────────────────────────────────────────────

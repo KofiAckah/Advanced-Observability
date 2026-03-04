@@ -224,6 +224,22 @@ resource "aws_ecs_task_definition" "app" {
         {
           name  = "DB_PORT"
           value = "5432"
+        },
+        {
+          name  = "OTEL_SERVICE_NAME"
+          value = "spendwise-backend"
+        },
+        {
+          name  = "OTEL_TRACES_EXPORTER"
+          value = "otlp"
+        },
+        {
+          name  = "OTEL_PROPAGATORS"
+          value = "tracecontext,baggage"
+        },
+        {
+          name  = "OTEL_EXPORTER_OTLP_ENDPOINT"
+          value = var.jaeger_endpoint
         }
       ]
       secrets = [
