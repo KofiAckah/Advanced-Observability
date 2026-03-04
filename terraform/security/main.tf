@@ -188,7 +188,7 @@ resource "aws_security_group_rule" "monitoring_jaeger_ui" {
 # OTLP HTTP ingest – ECS tasks inside VPC send traces to Jaeger (port 4318)
 resource "aws_security_group_rule" "monitoring_otlp_http" {
   type              = "ingress"
-  description       = "OTLP HTTP trace ingest from VPC (ECS → Jaeger)"
+  description       = "OTLP HTTP trace ingest from VPC (ECS to Jaeger)"
   from_port         = 4318
   to_port           = 4318
   protocol          = "tcp"
@@ -199,7 +199,7 @@ resource "aws_security_group_rule" "monitoring_otlp_http" {
 # OTLP gRPC ingest – ECS tasks inside VPC send traces to Jaeger (port 4317)
 resource "aws_security_group_rule" "monitoring_otlp_grpc" {
   type              = "ingress"
-  description       = "OTLP gRPC trace ingest from VPC (ECS → Jaeger)"
+  description       = "OTLP gRPC trace ingest from VPC (ECS to Jaeger)"
   from_port         = 4317
   to_port           = 4317
   protocol          = "tcp"

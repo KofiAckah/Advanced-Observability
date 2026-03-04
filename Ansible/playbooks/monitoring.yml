@@ -39,6 +39,9 @@
     app_backend_port: 5000
     node_exporter_port: 9100
 
+    # SMTP – set grafana_smtp_password in inventory.ini or with -e to enable email alerts
+    grafana_smtp_password: "{{ hostvars[inventory_hostname]['grafana_smtp_password'] | default('') }}"
+
   handlers:
     - name: Reload systemd
       systemd:
@@ -388,7 +391,7 @@
       lineinfile:
         path: /etc/grafana/grafana.ini
         regexp: '^[#;]?\s*password\s*='
-        line: 'password = {{ grafana_smtp_password }}'
+        line: 'password = {{ grafana_smtp_password | default("") }}'
         insertafter: '^\[smtp\]'
         state: present
       notify: Restart Grafana
