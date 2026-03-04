@@ -19,6 +19,7 @@ resource "aws_internet_gateway" "igw" {
 resource "aws_subnet" "public" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = var.public_subnet_cidr
+  availability_zone       = var.availability_zones[0] # eu-west-1a — must differ from public_2 for ALB
   map_public_ip_on_launch = true
 
   tags = {

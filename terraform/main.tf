@@ -120,6 +120,10 @@ module "ecs" {
   jaeger_endpoint    = "http://${module.compute.monitoring_private_ip}:4318"
   # Blue TG ARN is required by the CODE_DEPLOY deployment controller on the ECS service
   blue_tg_arn        = module.networking.blue_tg_arn
+
+  # ALB (with listeners) must be fully created before ECS service is replaced with
+  # CODE_DEPLOY controller — AWS rejects the UpdateService if no ALB is attached.
+  depends_on = [module.networking]
 }
 
 # ==============================================================
