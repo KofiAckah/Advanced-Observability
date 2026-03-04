@@ -23,11 +23,11 @@ data "aws_region" "current" {}
 # CloudWatch Log Group – application logs
 # ==============================================================
 resource "aws_cloudwatch_log_group" "app" {
-  name              = "/spendwise/app"
+  name              = "/${var.project_name}/${var.environment}/app"
   retention_in_days = 30
 
   tags = {
-    Name        = "/spendwise/app"
+    Name        = "/${var.project_name}/${var.environment}/app"
     Environment = var.environment
     Project     = var.project_name
   }
@@ -37,11 +37,11 @@ resource "aws_cloudwatch_log_group" "app" {
 # S3 Bucket – CloudTrail log storage
 # ==============================================================
 resource "aws_s3_bucket" "cloudtrail" {
-  bucket        = "spendwise-cloudtrail-${data.aws_caller_identity.current.account_id}"
+  bucket        = "${var.project_name}-${var.environment}-cloudtrail-${data.aws_caller_identity.current.account_id}"
   force_destroy = true
 
   tags = {
-    Name        = "spendwise-cloudtrail"
+    Name        = "${var.project_name}-${var.environment}-cloudtrail"
     Environment = var.environment
     Project     = var.project_name
   }
@@ -117,7 +117,7 @@ resource "aws_s3_bucket_policy" "cloudtrail" {
 # CloudTrail – management event trail
 # ==============================================================
 resource "aws_cloudtrail" "main" {
-  name                          = "spendwise-trail"
+  name                          = "${var.project_name}-${var.environment}-trail"
   s3_bucket_name                = aws_s3_bucket.cloudtrail.id
   include_global_service_events = true
   is_multi_region_trail         = false
@@ -127,7 +127,7 @@ resource "aws_cloudtrail" "main" {
   depends_on = [aws_s3_bucket_policy.cloudtrail]
 
   tags = {
-    Name        = "spendwise-trail"
+    Name        = "${var.project_name}-${var.environment}-trail"
     Environment = var.environment
     Project     = var.project_name
   }
@@ -141,10 +141,26 @@ resource "aws_guardduty_detector" "main" {
   finding_publishing_frequency = "FIFTEEN_MINUTES"
 
   tags = {
-    Name        = "spendwise-guardduty"
+    Name        = "${var.project_name}-${var.environment}-guardduty"
     Environment = var.environment
     Project     = var.project_name
   }
+}
+
+resource "aws_guardduty_detector_feature" "s3_data_events" {
+  detector_id = aws_guardduty_detector.main.id
+  name        = "S3_DATA_EVENTS"
+  status      = "ENABLED"
+
+  depends_on = [aws_guardduty_detector.main]
+}
+
+resource "aws_guardduty_detector_feature" "ebs_malware_protection" {
+  detector_id = aws_guardduty_detector.main.id
+  name        = "EBS_MALWARE_PROTECTION"
+  status      = "ENABLED"
+
+  depends_on = [aws_guardduty_detector.main]
 }
 
 # ==============================================================

@@ -68,7 +68,7 @@ resource "aws_instance" "app_server" {
 #   - Fetch secrets from Parameter Store                 → AmazonSSMReadOnlyAccess
 # ==============================================
 resource "aws_iam_role" "spendwise_ec2_role" {
-  name        = "spendwise-ec2-role"
+  name        = "${var.project_name}-${var.environment}-ec2-role"
   description = "EC2 instance role for SpendWise app server"
 
   assume_role_policy = jsonencode({
@@ -102,7 +102,7 @@ resource "aws_iam_role_policy_attachment" "ssm_readonly" {
 }
 
 resource "aws_iam_instance_profile" "ec2_profile" {
-  name = "spendwise-ec2-profile"
+  name = "${var.project_name}-${var.environment}-ec2-profile"
   role = aws_iam_role.spendwise_ec2_role.name
 
   tags = {

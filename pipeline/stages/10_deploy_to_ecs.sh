@@ -33,13 +33,13 @@ fi
 # ── Pre-flight 2: verify ECR images exist at this tag ──────────
 echo "--- Pre-flight: verifying ECR images (tag: ${IMAGE_TAG}) ---"
 aws ecr describe-images \
-    --repository-name monitor-spendwise-backend \
+    --repository-name advanced-monitor-spendwise-backend \
     --image-ids imageTag="${IMAGE_TAG}" \
     --region "${AWS_REGION}" > /dev/null
 echo "  ✅ backend:${IMAGE_TAG}"
 
 aws ecr describe-images \
-    --repository-name monitor-spendwise-frontend \
+    --repository-name advanced-monitor-spendwise-frontend \
     --image-ids imageTag="${IMAGE_TAG}" \
     --region "${AWS_REGION}" > /dev/null
 echo "  ✅ frontend:${IMAGE_TAG}"

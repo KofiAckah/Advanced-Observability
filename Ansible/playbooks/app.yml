@@ -117,12 +117,12 @@
     - name: Set environment and region facts
       set_fact:
         env_name: "{{ app_env | default('dev') }}"
-        region: "{{ aws_region | default('eu-central-1') }}"
+        region: "{{ aws_region | default('eu-west-1') }}"
       tags: [config]
 
     - name: Retrieve database name from Parameter Store
       shell: |
-        aws ssm get-parameter --name "/monitor-spendwise/{{ env_name }}/db/name" \
+        aws ssm get-parameter --name "/advanced-monitor-spendwise/{{ env_name }}/db/name" \
           --region {{ region }} --query 'Parameter.Value' --output text
       register: db_name
       changed_when: false
@@ -130,7 +130,7 @@
 
     - name: Retrieve database user from Parameter Store
       shell: |
-        aws ssm get-parameter --name "/monitor-spendwise/{{ env_name }}/db/user" \
+        aws ssm get-parameter --name "/advanced-monitor-spendwise/{{ env_name }}/db/user" \
           --region {{ region }} --with-decryption --query 'Parameter.Value' --output text
       register: db_user
       changed_when: false
@@ -139,7 +139,7 @@
 
     - name: Retrieve database password from Parameter Store
       shell: |
-        aws ssm get-parameter --name "/monitor-spendwise/{{ env_name }}/db/password" \
+        aws ssm get-parameter --name "/advanced-monitor-spendwise/{{ env_name }}/db/password" \
           --region {{ region }} --with-decryption --query 'Parameter.Value' --output text
       register: db_password
       changed_when: false
@@ -148,7 +148,7 @@
 
     - name: Retrieve backend port from Parameter Store
       shell: |
-        aws ssm get-parameter --name "/monitor-spendwise/{{ env_name }}/app/backend_port" \
+        aws ssm get-parameter --name "/advanced-monitor-spendwise/{{ env_name }}/app/backend_port" \
           --region {{ region }} --query 'Parameter.Value' --output text
       register: backend_port
       changed_when: false
@@ -156,7 +156,7 @@
 
     - name: Retrieve database host from Parameter Store
       shell: |
-        aws ssm get-parameter --name "/monitor-spendwise/{{ env_name }}/app/db_host" \
+        aws ssm get-parameter --name "/advanced-monitor-spendwise/{{ env_name }}/app/db_host" \
           --region {{ region }} --query 'Parameter.Value' --output text
       register: db_host
       changed_when: false
@@ -164,7 +164,7 @@
 
     - name: Retrieve database port from Parameter Store
       shell: |
-        aws ssm get-parameter --name "/monitor-spendwise/{{ env_name }}/app/db_port" \
+        aws ssm get-parameter --name "/advanced-monitor-spendwise/{{ env_name }}/app/db_port" \
           --region {{ region }} --query 'Parameter.Value' --output text
       register: db_port
       changed_when: false
@@ -172,7 +172,7 @@
 
     - name: Retrieve compose project name from Parameter Store
       shell: |
-        aws ssm get-parameter --name "/monitor-spendwise/{{ env_name }}/app/compose_project_name" \
+        aws ssm get-parameter --name "/advanced-monitor-spendwise/{{ env_name }}/app/compose_project_name" \
           --region {{ region }} --query 'Parameter.Value' --output text
       register: compose_project
       changed_when: false
@@ -180,7 +180,7 @@
 
     - name: Retrieve frontend port from Parameter Store
       shell: |
-        aws ssm get-parameter --name "/monitor-spendwise/{{ env_name }}/app/frontend_port" \
+        aws ssm get-parameter --name "/advanced-monitor-spendwise/{{ env_name }}/app/frontend_port" \
           --region {{ region }} --query 'Parameter.Value' --output text
       register: frontend_port
       changed_when: false

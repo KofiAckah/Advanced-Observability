@@ -397,20 +397,8 @@ resource "aws_iam_role_policy" "app_cloudwatch_logs" {
 data "aws_caller_identity" "current" {}
 
 # --- GuardDuty ---
-# Read existing detector — AWS only allows one per account/region
+# Read existing detector — features are managed in the monitoring module
 data "aws_guardduty_detector" "main" {}
-
-resource "aws_guardduty_detector_feature" "s3_data_events" {
-  detector_id = data.aws_guardduty_detector.main.id
-  name        = "S3_DATA_EVENTS"
-  status      = "ENABLED"
-}
-
-resource "aws_guardduty_detector_feature" "ebs_malware_protection" {
-  detector_id = data.aws_guardduty_detector.main.id
-  name        = "EBS_MALWARE_PROTECTION"
-  status      = "ENABLED"
-}
 
 # --- CloudTrail S3 Bucket ---
 resource "aws_s3_bucket" "cloudtrail" {

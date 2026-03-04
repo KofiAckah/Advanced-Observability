@@ -17,5 +17,5 @@ variable "environment" {
 variable "aws_region" {
   description = "AWS region where monitoring resources are deployed."
   type        = string
-  default     = "eu-central-1"
+  default     = "eu-west-1"
 }

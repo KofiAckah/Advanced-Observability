@@ -16,7 +16,7 @@ global:
   external_labels:
     environment: "{{ app_env | default('dev') }}"
     project:     "spendwise"
-    region:      "{{ aws_region | default('eu-central-1') }}"
+    region:      "{{ aws_region | default('eu-west-1') }}"
 
 # ----- Alert rules ----
 rule_files:

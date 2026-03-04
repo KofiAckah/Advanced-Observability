@@ -1,6 +1,6 @@
 # --- General Config ---
 variable "aws_region" {
-  description = "AWS Region to deploy resources (e.g., eu-central-1)"
+  description = "AWS Region to deploy resources"
   type        = string
 }
 

@@ -3,15 +3,15 @@ pipeline {
 
     environment {
         // AWS & Project Configuration
-        AWS_REGION        = 'eu-central-1'
+        AWS_REGION        = 'eu-west-1'
         AWS_ACCOUNT_ID    = credentials('aws-account-id')
-        PROJECT_NAME      = 'monitor-spendwise'
+        PROJECT_NAME      = 'advanced-monitor-spendwise'
         ENVIRONMENT       = 'dev'
 
         // ECR Repositories
         ECR_REGISTRY      = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-        BACKEND_ECR_REPO  = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/monitor-spendwise-backend"
-        FRONTEND_ECR_REPO = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/monitor-spendwise-frontend"
+        BACKEND_ECR_REPO  = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/advanced-monitor-spendwise-backend"
+        FRONTEND_ECR_REPO = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/advanced-monitor-spendwise-frontend"
 
         // Image versioning
         IMAGE_TAG = "${env.BUILD_NUMBER}"
@@ -21,9 +21,9 @@ pipeline {
         BACKEND_PORT = '5000'
 
         // ECS Configuration
-        ECS_CLUSTER   = 'monitor-spendwise-dev-cluster'
-        ECS_SERVICE   = 'monitor-spendwise-dev-service'
-        TASK_FAMILY   = 'monitor-spendwise-dev-task'
+        ECS_CLUSTER   = 'advanced-monitor-spendwise-dev-cluster'
+        ECS_SERVICE   = 'advanced-monitor-spendwise-dev-service'
+        TASK_FAMILY   = 'advanced-monitor-spendwise-dev-task'
 
         // Security Reports Directory
         REPORTS_DIR = 'security-reports'

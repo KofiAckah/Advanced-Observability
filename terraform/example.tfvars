@@ -1,6 +1,6 @@
 # --- General Config ---
-aws_region   = "eu-central-1"
-project_name = "monitor-spendwise"
+aws_region   = "eu-west-1"
+project_name = "advanced-monitor-spendwise"
 environment  = "dev"
 
 # --- Networking ---
