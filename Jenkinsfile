@@ -75,9 +75,6 @@ pipeline {
 
         // ── Stage 5 ──────────────────────────────────────────────────
         stage('SAST Scan - CodeQL') {
-            when {
-                expression { return false } // TEMPORARILY SKIPPED — remove this block to re-enable
-            }
             steps {
                 sh 'bash pipeline/stages/05_sast_codeql.sh'
             }
@@ -189,14 +186,14 @@ pipeline {
         // Load test using k6. Skipped by default — enable by removing the
         // when { } block to run a manual load-test against the live ECS URL.
         // Generates RED metrics in Prometheus + real traces in Jaeger.
-        stage('Load Test') {
-            when { expression { return false } }
-            steps {
-                sh 'bash pipeline/stages/14_load_test.sh'
-                archiveArtifacts artifacts: 'security-reports/load_test_summary.json',
-                                 allowEmptyArchive: true
-            }
-        }
+        // stage('Load Test') {
+        //     when { expression { return false } }
+        //     steps {
+        //         sh 'bash pipeline/stages/14_load_test.sh'
+        //         archiveArtifacts artifacts: 'security-reports/load_test_summary.json',
+        //                          allowEmptyArchive: true
+        //     }
+        // }
 
     }
 
